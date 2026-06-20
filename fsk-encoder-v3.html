@@ -73,8 +73,8 @@
   </div>
 
   <div class="grid">
-    <div class="ctrl space"><div class="row"><span class="name">F0 · BIT 0</span><span class="val"><span id="f0v">17000</span><span class="u"> Hz</span></span></div><input id="f0" type="range" min="13000" max="21000" step="50" value="17000"></div>
-    <div class="ctrl mark"><div class="row"><span class="name">F1 · BIT 1</span><span class="val"><span id="f1v">18000</span><span class="u"> Hz</span></span></div><input id="f1" type="range" min="13000" max="21000" step="50" value="18000"></div>
+    <div class="ctrl space"><div class="row"><span class="name">F0 · BIT 0</span><span class="val"><span id="f0v">11000</span><span class="u"> Hz</span></span></div><input id="f0" type="range" min="10000" max="14000" step="50" value="11000"></div>
+    <div class="ctrl mark"><div class="row"><span class="name">F1 · BIT 1</span><span class="val"><span id="f1v">12000</span><span class="u"> Hz</span></span></div><input id="f1" type="range" min="10000" max="14000" step="50" value="12000"></div>
     <div class="ctrl"><div class="row"><span class="name">BAUD</span><span class="val"><span id="bdv">100</span><span class="u"> bps</span></span></div><input id="bd" type="range" min="20" max="300" step="5" value="100"></div>
     <div class="ctrl"><div class="row"><span class="name">VOLUME</span><span class="val"><span id="vlv">35</span><span class="u"> %</span></span></div><input id="vl" type="range" min="0" max="100" step="1" value="35"></div>
   </div>
@@ -188,14 +188,14 @@ function downloadWAV(){const p=readP();const {bits}=buildBits(p);const c=ctx();l
   const url=URL.createObjectURL(encodeWAV(data,c.sampleRate));const a=document.createElement('a');a.href=url;a.download=`fsk_v3_${p.fec?'fec':'raw'}_${p.f0}-${p.f1}_${p.baud}bd${ch}.wav`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 
 /* ============ p5 スコープ ============ */
-const sketch=s=>{let W=700,H=220,fd=null;const F_LO=12000,F_HI=22000;
+const sketch=s=>{let W=700,H=220,fd=null;const F_LO=9000,F_HI=15000;
   s.setup=()=>{const h=$('scopeHolder');W=h.clientWidth||700;const c=s.createCanvas(W,H);c.parent(h);s.pixelDensity(Math.min(window.devicePixelRatio||1,2));};
   s.windowResized=()=>{const h=$('scopeHolder');W=h.clientWidth||700;s.resizeCanvas(W,H);};
   const xF=hz=>s.map(hz,F_LO,F_HI,38,W-12);
   s.draw=()=>{const p=readP();s.background(8,18,16);grid();
     if(playing&&analyser){if(!fd)fd=new Uint8Array(analyser.frequencyBinCount);analyser.getByteFrequencyData(fd);spec(fd);}else idle();
     mk(p.f0,[56,225,214],'0');mk(p.f1,[255,180,84],'1');};
-  function grid(){s.stroke(86,128,121,38);s.strokeWeight(1);for(let k=12;k<=22;k++){const x=xF(k*1000);s.line(x,18,x,H-14);}s.noStroke();s.fill(73,107,102);s.textFont('monospace');s.textSize(9);s.textAlign(s.CENTER,s.TOP);for(let k=12;k<=22;k+=2)s.text(k,xF(k*1000),H-12);}
+  function grid(){s.stroke(86,128,121,38);s.strokeWeight(1);for(let k=9;k<=15;k++){const x=xF(k*1000);s.line(x,18,x,H-14);}s.noStroke();s.fill(73,107,102);s.textFont('monospace');s.textSize(9);s.textAlign(s.CENTER,s.TOP);for(let k=9;k<=15;k+=2)s.text(k,xF(k*1000),H-12);}
   function spec(fd){const n=analyser.frequencyBinCount,nyq=audioCtx.sampleRate/2;s.noFill();s.stroke(110,180,170,180);s.strokeWeight(1.5);s.beginShape();let st=false;for(let i=0;i<n;i++){const hz=i/n*nyq;if(hz<F_LO||hz>F_HI)continue;const x=xF(hz),y=s.map(fd[i],0,255,H-16,18);if(!st){s.vertex(x,H-16);st=true;}s.vertex(x,y);}if(st)s.vertex(W-12,H-16);s.endShape();}
   function idle(){s.noStroke();s.fill(73,107,102,140);s.textFont('monospace');s.textSize(11);s.textAlign(s.CENTER,s.CENTER);s.text('— idle —  送信でキャリアが立ち上がります',W/2,H/2);}
   function mk(hz,c,l){const x=xF(hz);s.stroke(c[0],c[1],c[2],150);s.strokeWeight(1);s.drawingContext.setLineDash([3,4]);s.line(x,18,x,H-16);s.drawingContext.setLineDash([]);s.noStroke();s.fill(c[0],c[1],c[2]);s.textFont('monospace');s.textSize(10);s.textAlign(s.CENTER,s.BOTTOM);s.text(l,x,17);}

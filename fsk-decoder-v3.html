@@ -84,8 +84,8 @@
   </div>
 
   <div class="grid">
-    <div class="ctrl space"><div class="row"><span class="name">F0 · BIT 0</span><span class="val"><span id="f0v">17000</span><span class="u"> Hz</span></span></div><input id="f0" type="range" min="13000" max="21000" step="50" value="17000"></div>
-    <div class="ctrl mark"><div class="row"><span class="name">F1 · BIT 1</span><span class="val"><span id="f1v">18000</span><span class="u"> Hz</span></span></div><input id="f1" type="range" min="13000" max="21000" step="50" value="18000"></div>
+    <div class="ctrl space"><div class="row"><span class="name">F0 · BIT 0</span><span class="val"><span id="f0v">11000</span><span class="u"> Hz</span></span></div><input id="f0" type="range" min="10000" max="14000" step="50" value="11000"></div>
+    <div class="ctrl mark"><div class="row"><span class="name">F1 · BIT 1</span><span class="val"><span id="f1v">12000</span><span class="u"> Hz</span></span></div><input id="f1" type="range" min="10000" max="14000" step="50" value="12000"></div>
     <div class="ctrl"><div class="row"><span class="name">BAUD</span><span class="val"><span id="bdv">100</span><span class="u"> bps</span></span></div><input id="bd" type="range" min="20" max="300" step="5" value="100"></div>
   </div>
   <div class="hint">↑ 送信側と F0 / F1 / BAUD を一致させてください。FEC/RAW はSYNCで自動判別します。</div>
@@ -180,7 +180,7 @@ function buildEye(res,samp,maxSym=48,OSF=20){if(!res||!res.r||!res.frames.length
   return{traces,OSF};}
 
 /* ============ 状態・UI（v2踏襲） ============ */
-const $=id=>document.getElementById(id);const P={f0:17000,f1:18000,baud:100};
+const $=id=>document.getElementById(id);const P={f0:11000,f1:12000,baud:100};
 let audioCtx=null,analyser=null,micStream=null,micNode=null,listening=false;
 function readParams(){P.f0=+$('f0').value;P.f1=+$('f1').value;P.baud=+$('bd').value;$('f0v').textContent=P.f0;$('f1v').textContent=P.f1;$('bdv').textContent=P.baud;}
 function curOpts(){return{agc:$('optAgc').checked,drift:$('optDrift').checked};}
@@ -239,14 +239,14 @@ function setStatus(t,err){const s=$('status');s.textContent=t;s.classList.toggle
 function setPill(cls,t){const p=$('pill');p.className='pill'+(cls?' '+cls:'');p.textContent=t;}
 
 /* ============ p5 スコープ ============ */
-const sketch=s=>{let W=700,H=250,fd=null;const F_LO=12000,F_HI=22000,SP_T=20,SP_B=200;
+const sketch=s=>{let W=700,H=250,fd=null;const F_LO=9000,F_HI=15000,SP_T=20,SP_B=200;
   s.setup=()=>{const h=$('scopeHolder');W=h.clientWidth||700;const c=s.createCanvas(W,H);c.parent(h);s.pixelDensity(Math.min(window.devicePixelRatio||1,2));};
   s.windowResized=()=>{const h=$('scopeHolder');W=h.clientWidth||700;s.resizeCanvas(W,H);};
   const xF=hz=>s.map(hz,F_LO,F_HI,38,W-12);
   s.draw=()=>{const showEye=eyeData&&performance.now()<eyeUntil;$('scopeTag').textContent=showEye?'EYE DIAGRAM · soft decision':'RX SPECTRUM · kHz';s.background(8,18,16);
     if(showEye){eye();return;}grid();if(listening&&analyser){if(!fd)fd=new Uint8Array(analyser.frequencyBinCount);analyser.getByteFrequencyData(fd);spec(fd);}else idle();
     mk(P.f0,[56,225,214],'0');mk(P.f1,[255,180,84],'1');meters();};
-  function grid(){s.stroke(86,128,121,38);s.strokeWeight(1);for(let k=12;k<=22;k++){const x=xF(k*1000);s.line(x,SP_T,x,SP_B);}s.noStroke();s.fill(73,107,102);s.textFont('monospace');s.textSize(9);s.textAlign(s.CENTER,s.TOP);for(let k=12;k<=22;k+=2)s.text(k,xF(k*1000),SP_B+4);}
+  function grid(){s.stroke(86,128,121,38);s.strokeWeight(1);for(let k=9;k<=15;k++){const x=xF(k*1000);s.line(x,SP_T,x,SP_B);}s.noStroke();s.fill(73,107,102);s.textFont('monospace');s.textSize(9);s.textAlign(s.CENTER,s.TOP);for(let k=9;k<=15;k+=2)s.text(k,xF(k*1000),SP_B+4);}
   function spec(fd){const n=analyser.frequencyBinCount,nyq=audioCtx.sampleRate/2;s.noFill();s.stroke(110,180,170,180);s.strokeWeight(1.4);s.beginShape();let st=false;for(let i=0;i<n;i++){const hz=i/n*nyq;if(hz<F_LO||hz>F_HI)continue;const x=xF(hz),y=s.map(fd[i],0,255,SP_B,SP_T);if(!st){s.vertex(x,SP_B);st=true;}s.vertex(x,y);}if(st)s.vertex(W-12,SP_B);s.endShape();}
   function idle(){s.noStroke();s.fill(73,107,102,140);s.textFont('monospace');s.textSize(11);s.textAlign(s.CENTER,s.CENTER);s.text(listening?'— listening —':'— idle —',W/2,(SP_T+SP_B)/2);}
   function mk(hz,c,l){const x=xF(hz);s.stroke(c[0],c[1],c[2],150);s.strokeWeight(1);s.drawingContext.setLineDash([3,4]);s.line(x,SP_T,x,SP_B);s.drawingContext.setLineDash([]);s.noStroke();s.fill(c[0],c[1],c[2]);s.textFont('monospace');s.textSize(10);s.textAlign(s.CENTER,s.BOTTOM);s.text(l,x,SP_T-1);}
