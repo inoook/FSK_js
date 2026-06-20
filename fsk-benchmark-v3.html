@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FSK BENCHMARK v3 — FEC vs RAW 性能比較</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+<style>
+  :root{--bg:#07100f;--panel:#0b1816;--panel2:#0f201d;--line:rgba(86,128,121,.20);
+    --space:#38e1d6;--mark:#ffb454;--ink:#e2f5f0;--dim:#6f928c;--dim2:#496b66;--ok:#5ad18a;--warn:#ff6b6b;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--sans:system-ui,-apple-system,"Segoe UI",sans-serif;}
+  *{box-sizing:border-box}html,body{margin:0}
+  body{background:radial-gradient(1200px 600px at 50% -10%,#0d201d 0%,var(--bg) 60%);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased;line-height:1.5;padding:18px 14px 60px}
+  .wrap{max-width:760px;margin:0 auto}
+  header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+  .logo{font-family:var(--mono);font-weight:700;letter-spacing:.16em;font-size:13px;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 9px}
+  .logo b{color:var(--space)}.logo .v{color:var(--dim2);font-size:10px;margin-left:4px}
+  h1{font-size:15px;font-weight:600;margin:0}.sub{font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:.04em}
+  .chart{position:relative;border:1px solid var(--line);border-radius:10px;background:linear-gradient(180deg,#0a1715,#081210);overflow:hidden;margin-bottom:12px;box-shadow:inset 0 0 60px rgba(0,0,0,.5)}
+  #chartHolder canvas{display:block;width:100%!important;height:auto!important}
+  .legend{position:absolute;top:9px;right:11px;font-family:var(--mono);font-size:10px;display:flex;gap:14px;z-index:2}
+  .legend i{display:inline-block;width:12px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}.legend .f{background:var(--space)}.legend .r{background:var(--mark)}
+  .field{margin-bottom:12px}label.cap{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--dim);text-transform:uppercase;margin-bottom:6px}
+  input[type=text]{width:100%;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;font-family:var(--mono);font-size:15px;padding:11px 12px}
+  input[type=text]:focus,select:focus{outline:1px solid var(--space)}
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+  @media(min-width:560px){.grid{grid-template-columns:repeat(4,1fr)}}
+  .ctrl{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 11px}
+  .ctrl .row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px}
+  .ctrl .name{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--dim)}.ctrl .val{font-family:var(--mono);font-size:13px}.ctrl .val .u{color:var(--dim2);font-size:10px}
+  input[type=range]{width:100%;-webkit-appearance:none;appearance:none;height:3px;border-radius:3px;background:var(--line);margin:6px 0 0}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:var(--ink);border:2px solid var(--bg);cursor:pointer}
+  input[type=range]::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:var(--ink);border:2px solid var(--bg);cursor:pointer}
+  select{width:100%;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;font-family:var(--mono);font-size:13px;padding:9px 8px}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
+  button{font-family:var(--mono);font-size:13px;letter-spacing:.06em;border-radius:8px;padding:12px 18px;cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--ink);transition:.12s}
+  button:hover{border-color:var(--dim)}button.primary{background:var(--space);color:#04120f;border-color:var(--space);font-weight:700}button:disabled{opacity:.45;cursor:default}
+  .progress{height:3px;background:var(--line);border-radius:3px;margin:4px 0 12px;overflow:hidden}.progress>i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--space),var(--mark))}
+  .meta{display:flex;gap:18px;flex-wrap:wrap;font-family:var(--mono);font-size:11px;color:var(--dim);margin-bottom:12px}.meta b{color:var(--ink)}
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+  th,td{padding:7px 8px;text-align:right;border-bottom:1px solid var(--line)}th{color:var(--dim);font-weight:500;font-size:10px;letter-spacing:.08em;text-transform:uppercase}
+  th:first-child,td:first-child{text-align:left}td.f{color:var(--space)}td.r{color:var(--mark)}
+  .tableWrap{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 12px}
+  .status{font-family:var(--mono);font-size:11px;color:var(--dim);min-height:16px;margin:6px 2px}
+  footer{font-family:var(--mono);font-size:10px;color:var(--dim2);margin-top:20px;line-height:1.7}footer .k{color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">FSK·<b>BENCH</b><span class="v">v3</span></div>
+    <div><h1>FEC vs RAW 性能比較ベンチマーク</h1>
+      <div class="sub">Monte-Carlo · frame success-rate vs channel · 検証済みコーデック使用</div></div>
+  </header>
+
+  <div class="chart">
+    <div class="legend"><span><i class="f"></i>FEC</span><span><i class="r"></i>RAW（v1/v2相当）</span></div>
+    <div id="chartHolder"></div>
+  </div>
+
+  <div class="field"><label class="cap" for="msg">テストメッセージ</label><input id="msg" type="text" maxlength="80" value="FSK acoustic link test"></div>
+
+  <div class="grid">
+    <div class="ctrl space"><div class="row"><span class="name">F0</span><span class="val"><span id="f0v">17000</span><span class="u"> Hz</span></span></div><input id="f0" type="range" min="13000" max="21000" step="50" value="17000"></div>
+    <div class="ctrl mark"><div class="row"><span class="name">F1</span><span class="val"><span id="f1v">18000</span><span class="u"> Hz</span></span></div><input id="f1" type="range" min="13000" max="21000" step="50" value="18000"></div>
+    <div class="ctrl"><div class="row"><span class="name">BAUD</span><span class="val"><span id="bdv">100</span><span class="u"> bps</span></span></div><input id="bd" type="range" min="20" max="300" step="5" value="100"></div>
+    <div class="ctrl"><div class="row"><span class="name">試行/点</span><span class="val"><span id="trv">40</span></span></div><input id="tr" type="range" min="10" max="120" step="10" value="40"></div>
+  </div>
+
+  <div class="grid" style="margin-top:12px">
+    <div class="ctrl" style="grid-column:span 2"><div class="row"><span class="name">チャネル(横軸)</span></div>
+      <select id="chan"><option value="awgn">白色雑音 SNR掃引 (dB)</option><option value="burst">バースト欠落 回数掃引</option></select></div>
+    <div class="ctrl" style="grid-column:span 2"><div class="row"><span class="name">ドリフト探索</span></div>
+      <select id="drift"><option value="0">なし(高速)</option><option value="1">あり</option></select></div>
+  </div>
+
+  <div class="actions"><button class="primary" id="run">▶ ベンチマーク実行</button><button id="stop" disabled>■ 中断</button></div>
+  <div class="progress"><i id="prog"></i></div>
+  <div class="status" id="status">実行を押すと FEC と RAW の成功率を掃引します。</div>
+
+  <div class="meta">
+    <span>符号化率 <b>FEC 4/7</b></span>
+    <span>送信長 <b id="mLenF">—</b></span>
+    <span>RAW比 <b id="mVs">—</b></span>
+    <span>所要 <b id="mTime">—</b></span>
+  </div>
+
+  <div class="tableWrap"><table id="tbl"><thead><tr><th id="xh">x</th><th>FEC %</th><th>RAW %</th><th>差</th></tr></thead><tbody></tbody></table></div>
+
+  <footer>
+    <div><span class="k">読み方:</span> 縦軸=フレーム成功率(%)。FEC曲線がRAWより左/上にあるほど、悪い条件でも復号できる＝頑健。横軸が雑音SNRなら左ほど過酷、バースト回数なら右ほど過酷です。</div>
+    <div><span class="k">比較対象:</span> RAWは同一モデムの無符号伝送で、過去版(v1/v2)の挙動に相当します。差がFECで得られた利得です。</div>
+    <div><span class="k">注:</span> Goertzel積分利得が高いため雑音SNRは負dB域で差が出ます。音響で実際に多いのはバースト欠落で、そこではFECの差が顕著です。</div>
+  </footer>
+</div>
+
+<script>
+/* ============ 検証済みコーデック（送受信＋モデム＋チャネル） ============ */
+const PREAMBLE_BYTE=0xAA,PREAMBLE_COUNT=4,SYNC_FEC=0x7E2D,SYNC_RAW=0x81D2;
+function crc16(b){let c=0xFFFF;for(const x of b){c^=(x<<8)&0xFFFF;for(let i=0;i<8;i++)c=(c&0x8000)?((c<<1)^0x1021)&0xFFFF:(c<<1)&0xFFFF;}return c&0xFFFF;}
+function hammingEncode(nib){const d=[(nib>>3)&1,(nib>>2)&1,(nib>>1)&1,nib&1],c=new Array(8).fill(0);c[3]=d[0];c[5]=d[1];c[6]=d[2];c[7]=d[3];c[1]=c[3]^c[5]^c[7];c[2]=c[3]^c[6]^c[7];c[4]=c[5]^c[6]^c[7];return[c[1],c[2],c[3],c[4],c[5],c[6],c[7]];}
+function hammingDecode(cw){const c=[0,cw[0],cw[1],cw[2],cw[3],cw[4],cw[5],cw[6]];const s1=c[1]^c[3]^c[5]^c[7],s2=c[2]^c[3]^c[6]^c[7],s4=c[4]^c[5]^c[6]^c[7],syn=(s4<<2)|(s2<<1)|s1;if(syn>=1&&syn<=7)c[syn]^=1;return(c[3]<<3)|(c[5]<<2)|(c[6]<<1)|c[7];}
+function byteToBits(b){const o=[];for(let i=7;i>=0;i--)o.push((b>>i)&1);return o;}
+function bitsToByte(bits,pos){let b=0;for(let k=0;k<8;k++)b=(b<<1)|(bits[pos+k]&1);return b;}
+function bytesToNibbles(by){const o=[];for(const b of by)o.push((b>>4)&0xF,b&0xF);return o;}
+function nibblesToBytes(n){const o=[];for(let i=0;i+1<n.length;i+=2)o.push(((n[i]&0xF)<<4)|(n[i+1]&0xF));return o;}
+function wordBits(w){const o=[];for(let i=15;i>=0;i--)o.push((w>>i)&1);return o;}
+function preambleBits(){const o=[];for(let i=0;i<PREAMBLE_COUNT;i++)o.push(...byteToBits(PREAMBLE_BYTE));return o;}
+function interleave(cw){const M=cw.length,o=[];for(let col=0;col<7;col++)for(let j=0;j<M;j++)o.push(cw[j][col]);return o;}
+function deinterleave(bits,M){const cw=Array.from({length:M},()=>new Array(7).fill(0));let p=0;for(let col=0;col<7;col++)for(let j=0;j<M;j++)cw[j][col]=bits[p++]|0;return cw;}
+function buildFEC(pl){const LEN=pl.length,crc=crc16([LEN,...pl]),info=[...pl,(crc>>8)&0xFF,crc&0xFF];const cw=bytesToNibbles(info).map(hammingEncode),body=interleave(cw),hdr=bytesToNibbles([LEN]).map(hammingEncode);return[...preambleBits(),...wordBits(SYNC_FEC),...[].concat(...hdr),...body];}
+function buildRAW(pl){const LEN=pl.length,crc=crc16([LEN,...pl]),bytes=[LEN,...pl,(crc>>8)&0xFF,crc&0xFF];const o=[...preambleBits(),...wordBits(SYNC_RAW)];for(const b of bytes)o.push(...byteToBits(b));return o;}
+function mism(bits,pos,word){let m=0;for(let i=0;i<16;i++)if((bits[pos+i]&1)!==((word>>(15-i))&1))m++;return m;}
+function parseFEC(bits,p){const n=bits.length;if(p+14>n)return null;const LEN=(hammingDecode(bits.slice(p,p+7))<<4)|hammingDecode(bits.slice(p+7,p+14));const M=2*(LEN+2),bs=p+14,be=bs+M*7;if(be>n)return null;const cw=deinterleave(bits.slice(bs,be),M),nibs=cw.map(hammingDecode),info=nibblesToBytes(nibs);if(info.length<LEN+2)return null;const payload=info.slice(0,LEN),crcRx=(info[LEN]<<8)|info[LEN+1];if(crc16([LEN,...payload])!==crcRx)return null;return{payload};}
+function parseRAW(bits,p){const n=bits.length;if(p+8>n)return null;const LEN=bitsToByte(bits,p),end=p+8+(LEN+2)*8;if(end>n)return null;const by=[];for(let b=0;b<LEN+2;b++)by.push(bitsToByte(bits,p+8+b*8));const payload=by.slice(0,LEN),crcRx=(by[LEN]<<8)|by[LEN+1];if(crc16([LEN,...payload])!==crcRx)return null;return{payload};}
+function tryParse(bits){const n=bits.length;for(let i=0;i+16<=n;i++){if(mism(bits,i,SYNC_FEC)<=2){const r=parseFEC(bits,i+16);if(r)return r;}if(mism(bits,i,SYNC_RAW)<=2){const r=parseRAW(bits,i+16);if(r)return r;}}return null;}
+
+function hann(N){const w=new Float32Array(N);for(let i=0;i<N;i++)w[i]=0.5-0.5*Math.cos(2*Math.PI*i/(N-1));return w;}
+function modulate(bits,sr,f0,f1,baud,amp){const spb=Math.round(sr/baud),data=new Float32Array(bits.length*spb);let ph=0,idx=0;for(const bit of bits){const f=bit?f1:f0,d=2*Math.PI*f/sr;for(let i=0;i<spb;i++){data[idx++]=Math.sin(ph)*amp;ph+=d;if(ph>2*Math.PI)ph-=2*Math.PI;}}return data;}
+function pairP(samp,start,win,ca,cb){const N=win.length;let a1=0,a2=0,b1=0,b2=0;for(let i=0;i<N;i++){const x=win[i]*samp[start+i];const a0=x+ca*a1-a2;a2=a1;a1=a0;const b0=x+cb*b1-b2;b2=b1;b1=b0;}let p0=a1*a1+a2*a2-ca*a1*a2,p1=b1*b1+b2*b2-cb*b1*b2;return[p0>0?p0:0,p1>0?p1:0];}
+function demodHard(samp,sr,f0,f1,phase,spbF,win){const ca=2*Math.cos(2*Math.PI*f0/sr),cb=2*Math.cos(2*Math.PI*f1/sr),N=win.length,bits=[];let k=0;for(;;){const start=Math.round(phase+k*spbF);if(start+N>samp.length)break;const[p0,p1]=pairP(samp,start,win,ca,cb);bits.push(p1>=p0?1:0);k++;}return bits;}
+function decodeSignal(samp,sr,f0,f1,baud,drift){const spb=Math.round(sr/baud);if(spb<4||samp.length<spb*8)return null;const win=hann(spb),pstep=Math.max(1,Math.floor(spb/16)),drifts=drift?[1-0.003,1,1+0.003]:[1];for(const sc of drifts)for(let ph=0;ph<spb;ph+=pstep){const r=tryParse(demodHard(samp,sr,f0,f1,ph,spb*sc,win));if(r)return r;}return null;}
+let _g2=null;function randn(){if(_g2!==null){const v=_g2;_g2=null;return v;}let u=0,v=0,s=0;do{u=Math.random()*2-1;v=Math.random()*2-1;s=u*u+v*v;}while(s===0||s>=1);const m=Math.sqrt(-2*Math.log(s)/s);_g2=v*m;return u*m;}
+function addNoise(data,amp,snrDb){const Ps=amp*amp/2,sigma=Math.sqrt(Ps/Math.pow(10,snrDb/10)),out=new Float32Array(data.length);for(let i=0;i<data.length;i++)out[i]=data[i]+randn()*sigma;return out;}
+function burst(sig,spb,nb,bs){const out=sig.slice();for(let b=0;b<nb;b++){const sSym=(Math.random()*Math.max(1,sig.length/spb-bs))|0;for(let s=0;s<bs;s++){const o=(sSym+s)*spb;for(let i=0;i<spb&&o+i<out.length;i++)out[o+i]=0;}}return out;}
+
+/* ============ ベンチ実行 ============ */
+const $=id=>document.getElementById(id);
+const sr=48000, amp=0.5;
+let results=[], running=false, xLabel='SNR (dB)', t0=0;
+const eqPL=(r,pl)=>{if(!r)return false;if(r.payload.length!==pl.length)return false;for(let i=0;i<pl.length;i++)if(r.payload[i]!==pl[i])return false;return true;};
+
+function xPoints(kind){return kind==='awgn'?[-24,-22,-20,-18,-16,-14,-12,-10,-8]:[0,1,2,3,4,5,6,7,8];}
+
+async function run(){
+  if(running)return; running=true; $('run').disabled=true; $('stop').disabled=false; results=[];
+  $('tbl').querySelector('tbody').innerHTML='';
+  const f0=+$('f0').value,f1=+$('f1').value,baud=+$('bd').value,trials=+$('tr').value,kind=$('chan').value,drift=$('drift').value==='1';
+  const spb=Math.round(sr/baud), bs=3;
+  xLabel = kind==='awgn'?'SNR (dB)':'バースト回数';
+  $('xh').textContent = kind==='awgn'?'SNR dB':'#bursts';
+  const pl=Array.from(new TextEncoder().encode($('msg').value)).slice(0,80);
+  const fb=buildFEC(pl), rb=buildRAW(pl);
+  const sigF=modulate(fb,sr,f0,f1,baud,amp), sigR=modulate(rb,sr,f0,f1,baud,amp);
+  $('mLenF').textContent=(fb.length/baud).toFixed(2)+'s / '+fb.length+'b';
+  $('mVs').textContent='×'+(fb.length/rb.length).toFixed(2);
+  const xs=xPoints(kind); t0=performance.now();
+  for(let xi=0; xi<xs.length; xi++){
+    if(!running)break;
+    const x=xs[xi]; let fOk=0,rOk=0;
+    for(let t=0;t<trials;t++){
+      let chF,chR;
+      if(kind==='awgn'){ chF=addNoise(sigF,amp,x); chR=addNoise(sigR,amp,x); }
+      else { chF=burst(sigF,spb,x,bs); chR=burst(sigR,spb,x,bs); }
+      if(eqPL(decodeSignal(chF,sr,f0,f1,baud,drift),pl)) fOk++;
+      if(eqPL(decodeSignal(chR,sr,f0,f1,baud,drift),pl)) rOk++;
+    }
+    results.push({x, fec:100*fOk/trials, raw:100*rOk/trials});
+    addRow(results[results.length-1], kind);
+    $('prog').style.width=((xi+1)/xs.length*100).toFixed(0)+'%';
+    $('status').textContent=`計算中… ${xi+1}/${xs.length} 点（${trials}試行/点 ×2）`;
+    await new Promise(r=>setTimeout(r,0));
+  }
+  $('mTime').textContent=((performance.now()-t0)/1000).toFixed(1)+'s';
+  $('status').textContent= running? '完了。FEC曲線がRAWより過酷側に張り出すほど、誤り訂正の利得が大きいことを示します。' : '中断しました。';
+  running=false; $('run').disabled=false; $('stop').disabled=true;
+}
+function addRow(r,kind){const tb=$('tbl').querySelector('tbody');const tr=document.createElement('tr');
+  const diff=(r.fec-r.raw); tr.innerHTML=`<td>${r.x}</td><td class="f">${r.fec.toFixed(0)}</td><td class="r">${r.raw.toFixed(0)}</td><td>${diff>0?'+':''}${diff.toFixed(0)}</td>`;tb.appendChild(tr);}
+
+/* ============ p5 グラフ ============ */
+const sketch=s=>{let W=700,H=300;const M={l:46,r:14,t:18,b:34};
+  s.setup=()=>{const h=$('chartHolder');W=h.clientWidth||700;const c=s.createCanvas(W,H);c.parent(h);s.pixelDensity(Math.min(window.devicePixelRatio||1,2));};
+  s.windowResized=()=>{const h=$('chartHolder');W=h.clientWidth||700;s.resizeCanvas(W,H);};
+  s.draw=()=>{s.background(8,18,16);
+    const x0=M.l,x1=W-M.r,y0=H-M.b,y1=M.t;
+    // grid Y (0-100%)
+    s.textFont('monospace');s.textSize(9);
+    for(let p=0;p<=100;p+=25){const y=s.map(p,0,100,y0,y1);s.stroke(86,128,121,p===0?60:28);s.strokeWeight(1);s.line(x0,y,x1,y);s.noStroke();s.fill(73,107,102);s.textAlign(s.RIGHT,s.CENTER);s.text(p+'%',x0-6,y);}
+    if(!results.length){s.noStroke();s.fill(73,107,102,150);s.textSize(11);s.textAlign(s.CENTER,s.CENTER);s.text('「ベンチマーク実行」で FEC vs RAW の成功率を描画',(x0+x1)/2,(y0+y1)/2);drawXlabel(x0,x1,y0);return;}
+    const xs=results.map(r=>r.x),xmin=Math.min(...xs),xmax=Math.max(...xs);
+    const X=v=>s.map(v,xmin,xmax,x0,x1),Y=v=>s.map(v,0,100,y0,y1);
+    // X grid+labels
+    for(const r of results){const x=X(r.x);s.stroke(86,128,121,20);s.line(x,y0,x,y1);s.noStroke();s.fill(73,107,102);s.textAlign(s.CENTER,s.TOP);s.text(r.x,x,y0+5);}
+    drawXlabel(x0,x1,y0);
+    plot(results,'raw',[255,180,84],X,Y); plot(results,'fec',[56,225,214],X,Y);
+  };
+  function plot(data,key,col,X,Y){s.noFill();s.stroke(col[0],col[1],col[2]);s.strokeWeight(2);s.beginShape();for(const r of data)s.vertex(X(r.x),Y(r[key]));s.endShape();
+    s.noStroke();s.fill(col[0],col[1],col[2]);for(const r of data)s.circle(X(r.x),Y(r[key]),5);}
+  function drawXlabel(x0,x1,y0){s.noStroke();s.fill(111,146,140);s.textSize(10);s.textAlign(s.CENTER,s.TOP);s.text(xLabel,(x0+x1)/2,y0+18);}
+};
+
+window.addEventListener('DOMContentLoaded',()=>{
+  const sync=()=>{$('f0v').textContent=$('f0').value;$('f1v').textContent=$('f1').value;$('bdv').textContent=$('bd').value;$('trv').textContent=$('tr').value;};
+  ['f0','f1','bd','tr'].forEach(id=>$(id).addEventListener('input',sync));
+  $('run').addEventListener('click',run);$('stop').addEventListener('click',()=>{running=false;});
+  new p5(sketch);sync();
+});
+</script>
+</body>
+</html>
