@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FSK ENCODER — 高周波データ音響送信</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+<style>
+  :root{
+    --bg:#07100f;
+    --panel:#0b1816;
+    --panel2:#0f201d;
+    --line:rgba(86,128,121,.20);
+    --space:#38e1d6;   /* bit 0 = space tone */
+    --mark:#ffb454;    /* bit 1 = mark tone  */
+    --ink:#e2f5f0;
+    --dim:#6f928c;
+    --dim2:#496b66;
+    --warn:#ff6b6b;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:
+      radial-gradient(1200px 600px at 50% -10%, #0d201d 0%, var(--bg) 60%);
+    color:var(--ink);
+    font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;
+    line-height:1.5;
+    padding:18px 14px 60px;
+  }
+  .wrap{max-width:760px;margin:0 auto}
+
+  header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+  .logo{
+    font-family:var(--mono);font-weight:700;letter-spacing:.18em;
+    font-size:13px;color:var(--space);
+    border:1px solid var(--line);border-radius:6px;padding:5px 9px;
+    box-shadow:inset 0 0 24px rgba(56,225,214,.06);
+  }
+  .logo b{color:var(--mark)}
+  h1{font-size:15px;font-weight:600;margin:0;color:var(--ink)}
+  .sub{font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:.04em}
+
+  /* ---- スコープ(主役) ---- */
+  .scope{
+    position:relative;border:1px solid var(--line);border-radius:10px;
+    background:linear-gradient(180deg,#0a1715,#081210);
+    overflow:hidden;margin-bottom:14px;
+    box-shadow:inset 0 0 60px rgba(0,0,0,.5);
+  }
+  #scopeHolder canvas{display:block;width:100%!important;height:auto!important}
+  .scopeTag{
+    position:absolute;top:9px;left:11px;z-index:2;
+    font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--dim);
+  }
+  .legend{
+    position:absolute;top:9px;right:11px;z-index:2;
+    font-family:var(--mono);font-size:10px;display:flex;gap:12px;
+  }
+  .legend i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:0}
+  .legend .s{background:var(--space)} .legend .m{background:var(--mark)}
+
+  /* ---- 入力 ---- */
+  .field{margin-bottom:12px}
+  label.cap{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+    color:var(--dim);text-transform:uppercase;margin-bottom:6px}
+  textarea{
+    width:100%;min-height:62px;resize:vertical;
+    background:var(--panel);color:var(--ink);
+    border:1px solid var(--line);border-radius:8px;
+    font-family:var(--mono);font-size:15px;padding:11px 12px;
+  }
+  textarea:focus,select:focus{outline:1px solid var(--space);outline-offset:0}
+
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+  @media(min-width:560px){.grid{grid-template-columns:repeat(4,1fr)}}
+  .ctrl{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 11px}
+  .ctrl .row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px}
+  .ctrl .name{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--dim)}
+  .ctrl .val{font-family:var(--mono);font-size:13px;color:var(--ink)}
+  .ctrl .val .u{color:var(--dim2);font-size:10px}
+  input[type=range]{width:100%;-webkit-appearance:none;appearance:none;height:3px;border-radius:3px;
+    background:var(--line);margin:6px 0 0}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;
+    background:var(--ink);border:2px solid var(--bg);cursor:pointer}
+  input[type=range]::-moz-range-thumb{width:15px;height:15px;border-radius:50%;
+    background:var(--ink);border:2px solid var(--bg);cursor:pointer}
+  .ctrl.space input[type=range]::-webkit-slider-thumb{background:var(--space)}
+  .ctrl.space input[type=range]::-moz-range-thumb{background:var(--space)}
+  .ctrl.mark  input[type=range]::-webkit-slider-thumb{background:var(--mark)}
+  .ctrl.mark  input[type=range]::-moz-range-thumb{background:var(--mark)}
+
+  .warn{font-family:var(--mono);font-size:11px;color:var(--warn);min-height:16px;margin:2px 2px 10px}
+
+  /* ---- ボタン ---- */
+  .actions{display:flex;gap:10px;flex-wrap:wrap;margin:4px 0 14px}
+  button{
+    font-family:var(--mono);font-size:13px;letter-spacing:.06em;
+    border-radius:8px;padding:12px 18px;cursor:pointer;border:1px solid var(--line);
+    background:var(--panel);color:var(--ink);transition:.12s;
+  }
+  button:hover{border-color:var(--dim)}
+  button.primary{background:var(--space);color:#04120f;border-color:var(--space);font-weight:700}
+  button.primary:hover{filter:brightness(1.08)}
+  button.primary:disabled{opacity:.45;cursor:default;filter:none}
+  button.ghost:hover{background:var(--panel2)}
+
+  /* ---- 読み出し ---- */
+  .readout{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px 14px}
+  .meta{display:flex;gap:18px;flex-wrap:wrap;font-family:var(--mono);font-size:11px;color:var(--dim);margin-bottom:11px}
+  .meta b{color:var(--ink);font-weight:600}
+  .hex{font-family:var(--mono);font-size:12px;color:var(--dim);word-break:break-all;line-height:1.7;margin-bottom:12px}
+  .hex .pre{color:var(--dim2)} .hex .syn{color:#c98bff} .hex .pay{color:var(--ink)} .hex .crc{color:var(--mark)}
+
+  .bits{display:flex;flex-wrap:wrap;gap:3px}
+  .byte{display:flex;gap:2px;padding:3px;border-radius:4px;background:rgba(255,255,255,.015)}
+  .bit{width:11px;height:18px;border-radius:2px;font-family:var(--mono);font-size:9px;
+    display:flex;align-items:center;justify-content:center;color:#04120f;opacity:.30;transition:opacity .05s}
+  .bit.b0{background:var(--space)} .bit.b1{background:var(--mark)}
+  .bit.on{opacity:1;box-shadow:0 0 8px currentColor}
+  .bit.played{opacity:.62}
+
+  .progress{height:3px;background:var(--line);border-radius:3px;margin-top:13px;overflow:hidden}
+  .progress > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--space),var(--mark))}
+
+  footer{font-family:var(--mono);font-size:10px;color:var(--dim2);margin-top:22px;line-height:1.7}
+  .k{color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">FSK·<b>TX</b></div>
+    <div>
+      <h1>高周波データ音響エンコーダー</h1>
+      <div class="sub">continuous-phase FSK / near-ultrasonic carrier</div>
+    </div>
+  </header>
+
+  <!-- 主役:スペクトラムスコープ -->
+  <div class="scope">
+    <div class="scopeTag">SPECTRUM · kHz</div>
+    <div class="legend"><span><i class="s"></i>0 (space)</span><span><i class="m"></i>1 (mark)</span></div>
+    <div id="scopeHolder"></div>
+  </div>
+
+  <!-- メッセージ -->
+  <div class="field">
+    <label class="cap" for="msg">送信メッセージ（UTF-8 / 最大120文字）</label>
+    <textarea id="msg" maxlength="120" spellcheck="false">FSK</textarea>
+  </div>
+
+  <!-- パラメータ -->
+  <div class="grid">
+    <div class="ctrl space">
+      <div class="row"><span class="name">F0 · BIT 0</span><span class="val"><span id="f0v">17000</span><span class="u"> Hz</span></span></div>
+      <input id="f0" type="range" min="13000" max="21000" step="50" value="17000">
+    </div>
+    <div class="ctrl mark">
+      <div class="row"><span class="name">F1 · BIT 1</span><span class="val"><span id="f1v">18000</span><span class="u"> Hz</span></span></div>
+      <input id="f1" type="range" min="13000" max="21000" step="50" value="18000">
+    </div>
+    <div class="ctrl">
+      <div class="row"><span class="name">BAUD</span><span class="val"><span id="bdv">100</span><span class="u"> bps</span></span></div>
+      <input id="bd" type="range" min="20" max="300" step="5" value="100">
+    </div>
+    <div class="ctrl">
+      <div class="row"><span class="name">VOLUME</span><span class="val"><span id="vlv">35</span><span class="u"> %</span></span></div>
+      <input id="vl" type="range" min="0" max="100" step="1" value="35">
+    </div>
+  </div>
+  <div class="warn" id="warn"></div>
+
+  <div class="actions">
+    <button class="primary" id="tx">▶ 送信 TRANSMIT</button>
+    <button class="ghost" id="wav">⤓ WAV保存</button>
+    <button class="ghost" id="stop">■ 停止</button>
+  </div>
+
+  <!-- フレーム読み出し -->
+  <div class="readout">
+    <div class="meta">
+      <span>FRAME <b id="mBytes">0</b> bytes</span>
+      <span>BITS <b id="mBits">0</b></span>
+      <span>DURATION <b id="mDur">0.00</b> s</span>
+      <span>Δf <b id="mSep">1000</b> Hz</span>
+    </div>
+    <div class="hex" id="hex"></div>
+    <div class="bits" id="bits"></div>
+    <div class="progress"><i id="prog"></i></div>
+  </div>
+
+  <footer>
+    <div><span class="k">FRAME:</span> [AA AA] preamble · [7E] sync · [LEN] · payload(UTF-8) · [CRC-8 poly 0x07] — 各バイトMSBファースト</div>
+    <div><span class="k">注:</span> 連続位相方式でビット境界のクリックを抑制。高周波はスピーカ／マイクの特性に依存し、近くの人やペットに聞こえる場合があります。音量にご注意を。</div>
+  </footer>
+</div>
+
+<script>
+/* =========================================================
+   FSK ENCODER  —  ロジック
+   ========================================================= */
+const PREAMBLE = [0xAA, 0xAA];   // 10101010 … AGC/同期用
+const SYNC     = 0x7E;           // 01111110 … スタートフラグ
+
+// CRC-8 (poly 0x07, init 0x00)
+function crc8(bytes){
+  let c = 0x00;
+  for(const b of bytes){
+    c ^= b;
+    for(let i=0;i<8;i++) c = (c & 0x80) ? ((c<<1)^0x07)&0xFF : (c<<1)&0xFF;
+  }
+  return c;
+}
+
+// テキスト → フレームバイト列
+function buildFrame(text){
+  const payload = Array.from(new TextEncoder().encode(text)).slice(0,255);
+  const body = [payload.length, ...payload];   // LEN + payload
+  const crc  = crc8(body);
+  return {
+    bytes:[...PREAMBLE, SYNC, ...body, crc],
+    map:{preamble:PREAMBLE.length, sync:1, payload:body.length, crc:1}
+  };
+}
+
+// バイト列 → ビット配列 (MSB first)
+function bytesToBits(bytes){
+  const bits=[];
+  for(const b of bytes) for(let i=7;i>=0;i--) bits.push((b>>i)&1);
+  return bits;
+}
+
+// 連続位相FSKでサンプル生成（クリック防止）
+function synthFSK(bits, sampleRate, f0, f1, baud, amp){
+  const spb   = Math.round(sampleRate / baud);   // samples per bit
+  const total = bits.length * spb;
+  const data  = new Float32Array(total);
+  let phase=0, idx=0;
+  for(const bit of bits){
+    const f = bit ? f1 : f0;
+    const dph = 2*Math.PI*f/sampleRate;
+    for(let i=0;i<spb;i++){
+      data[idx++] = Math.sin(phase)*amp;
+      phase += dph;
+      if(phase>2*Math.PI) phase -= 2*Math.PI;
+    }
+  }
+  // 全体の前後に5msフェード
+  const fade = Math.min((sampleRate*0.005)|0, (total/2)|0);
+  for(let i=0;i<fade;i++){ const g=i/fade; data[i]*=g; data[total-1-i]*=g; }
+  return data;
+}
+
+// Float32 → 16bit PCM WAV Blob
+function encodeWAV(data, sampleRate){
+  const n = data.length, buf = new ArrayBuffer(44+n*2), v = new DataView(buf);
+  const ws=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i));};
+  ws(0,'RIFF'); v.setUint32(4,36+n*2,true); ws(8,'WAVE'); ws(12,'fmt ');
+  v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+  v.setUint32(24,sampleRate,true); v.setUint32(28,sampleRate*2,true);
+  v.setUint16(32,2,true); v.setUint16(34,16,true); ws(36,'data'); v.setUint32(40,n*2,true);
+  let o=44;
+  for(let i=0;i<n;i++){ let s=Math.max(-1,Math.min(1,data[i])); v.setInt16(o,s<0?s*0x8000:s*0x7FFF,true); o+=2; }
+  return new Blob([buf],{type:'audio/wav'});
+}
+
+/* =========================================================
+   状態・オーディオ
+   ========================================================= */
+let audioCtx=null, analyser=null, source=null;
+let playStart=0, playDur=0, playing=false, curBits=[], curBaud=100;
+
+function ctx(){
+  if(!audioCtx){
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 4096;
+    analyser.smoothingTimeConstant = 0.55;
+    analyser.connect(audioCtx.destination);
+  }
+  return audioCtx;
+}
+
+function stopAudio(){
+  if(source){ try{source.stop();}catch(e){} source.disconnect(); source=null; }
+  playing=false;
+}
+
+function transmit(){
+  const p = readParams();
+  const {bits} = preview(p);            // 現在のフレームのビット
+  const c = ctx();
+  if(c.state==='suspended') c.resume();
+  stopAudio();
+
+  const data = synthFSK(bits, c.sampleRate, p.f0, p.f1, p.baud, p.amp);
+  const ab = c.createBuffer(1, data.length, c.sampleRate);
+  ab.copyToChannel(data, 0);
+  source = c.createBufferSource();
+  source.buffer = ab;
+  source.connect(analyser);
+  source.onended = ()=>{ playing=false; };
+
+  curBits = bits; curBaud = p.baud;
+  playStart = c.currentTime; playDur = data.length / c.sampleRate; playing=true;
+  source.start();
+}
+
+function downloadWAV(){
+  const p = readParams();
+  const {bits} = preview(p);
+  const c = ctx();
+  const data = synthFSK(bits, c.sampleRate, p.f0, p.f1, p.baud, p.amp);
+  const url = URL.createObjectURL(encodeWAV(data, c.sampleRate));
+  const a = document.createElement('a');
+  a.href=url; a.download=`fsk_${p.f0}-${p.f1}hz_${p.baud}bd.wav`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+
+/* =========================================================
+   UI（パラメータ読み取り / プレビュー描画）
+   ========================================================= */
+const $ = id=>document.getElementById(id);
+
+function readParams(){
+  return {
+    text:$('msg').value,
+    f0:+$('f0').value, f1:+$('f1').value,
+    baud:+$('bd').value, amp:(+$('vl').value)/100
+  };
+}
+
+function preview(p){
+  const {bytes,map} = buildFrame(p.text);
+  const bits = bytesToBits(bytes);
+
+  // メタ
+  $('mBytes').textContent = bytes.length;
+  $('mBits').textContent  = bits.length;
+  $('mDur').textContent   = (bits.length/p.baud).toFixed(2);
+  $('mSep').textContent   = Math.abs(p.f1-p.f0);
+
+  // HEXダンプ（色分け）
+  let html='', i=0;
+  const seg=(cls,len)=>{ for(let k=0;k<len;k++,i++) html+=`<span class="${cls}">${bytes[i].toString(16).padStart(2,'0').toUpperCase()}</span> `; };
+  seg('pre',map.preamble); seg('syn',map.sync); seg('pay',map.payload); seg('crc',map.crc);
+  $('hex').innerHTML = html;
+
+  // ビットセル
+  const bc = $('bits'); bc.innerHTML='';
+  for(let b=0;b<bytes.length;b++){
+    const byteEl=document.createElement('div'); byteEl.className='byte';
+    for(let k=7;k>=0;k--){
+      const v=(bytes[b]>>k)&1;
+      const el=document.createElement('div');
+      el.className='bit '+(v?'b1':'b0'); el.textContent=v;
+      byteEl.appendChild(el);
+    }
+    bc.appendChild(byteEl);
+  }
+  return {bits};
+}
+
+// 警告（周波数分離・Nyquist）
+function checkWarn(p, sr){
+  const nyq = (sr||48000)/2;
+  if(p.f0===p.f1) return 'F0 と F1 が同一です。異なる周波数に設定してください。';
+  if(Math.abs(p.f1-p.f0) < p.baud) return `周波数差 ${Math.abs(p.f1-p.f0)}Hz が baud(${p.baud}) より狭く、復調が不安定になります。`;
+  if(Math.max(p.f0,p.f1) > nyq-500) return `周波数が高すぎます（Nyquist≈${(nyq/1000).toFixed(1)}kHz）。下げてください。`;
+  return '';
+}
+
+// スライダ・入力のバインド
+function bindUI(){
+  const sync=()=>{
+    const p=readParams();
+    $('f0v').textContent=p.f0; $('f1v').textContent=p.f1;
+    $('bdv').textContent=p.baud; $('vlv').textContent=Math.round(p.amp*100);
+    preview(p);
+    const w=checkWarn(p, audioCtx&&audioCtx.sampleRate);
+    $('warn').textContent=w;
+    $('tx').disabled = (p.f0===p.f1);
+  };
+  ['msg','f0','f1','bd','vl'].forEach(id=>$(id).addEventListener('input',sync));
+  $('tx').addEventListener('click', transmit);
+  $('wav').addEventListener('click', downloadWAV);
+  $('stop').addEventListener('click', stopAudio);
+  sync();
+}
+
+/* =========================================================
+   p5.js — スペクトラムスコープ（主役の可視化）
+   ========================================================= */
+const sketch = (s)=>{
+  let W=700, H=240, freqData=null;
+  const F_LO=12000, F_HI=22000;   // 表示帯域
+
+  s.setup=()=>{
+    const holder=document.getElementById('scopeHolder');
+    W = holder.clientWidth || 700;
+    const c=s.createCanvas(W,H); c.parent(holder);
+    s.pixelDensity(Math.min(window.devicePixelRatio||1,2));
+  };
+  s.windowResized=()=>{
+    const holder=document.getElementById('scopeHolder');
+    W = holder.clientWidth || 700;
+    s.resizeCanvas(W,H);
+  };
+
+  const xFor=(hz)=> s.map(hz, F_LO, F_HI, 38, W-12);
+
+  s.draw=()=>{
+    s.background(8,18,16);
+    drawGrid();
+
+    const p=readParams();
+
+    // 進行・ビット同期
+    let curIdx=-1, frac=0;
+    if(playing && audioCtx){
+      const t=audioCtx.currentTime-playStart;
+      frac=Math.max(0,Math.min(1, t/playDur));
+      curIdx=Math.floor(t*curBaud);
+      if(curIdx>=curBits.length){ curIdx=-1; }
+    }
+    updateBitHighlight(curIdx, frac);
+
+    // スペクトラム
+    if(playing && analyser){
+      if(!freqData) freqData=new Uint8Array(analyser.frequencyBinCount);
+      analyser.getByteFrequencyData(freqData);
+      drawSpectrum(freqData);
+    } else {
+      drawIdle();
+    }
+
+    // キャリアマーカ
+    marker(p.f0, [56,225,214], '0');
+    marker(p.f1, [255,180,84], '1');
+
+    // 現在送出中ビットの強調
+    if(curIdx>=0 && curIdx<curBits.length){
+      const f = curBits[curIdx] ? p.f1 : p.f0;
+      const col = curBits[curIdx] ? [255,180,84] : [56,225,214];
+      s.noStroke(); s.fill(col[0],col[1],col[2],28);
+      const x=xFor(f); s.rect(x-9,18,18,H-30);
+    }
+  };
+
+  function drawGrid(){
+    s.stroke(86,128,121,38); s.strokeWeight(1);
+    for(let khz=12;khz<=22;khz++){
+      const x=xFor(khz*1000); s.line(x,18,x,H-14);
+    }
+    s.noStroke(); s.fill(73,107,102); s.textFont('monospace'); s.textSize(9); s.textAlign(s.CENTER,s.TOP);
+    for(let khz=12;khz<=22;khz+=2){ s.text(khz, xFor(khz*1000), H-12); }
+    s.stroke(86,128,121,22);
+    for(let i=1;i<4;i++){ const y=s.map(i,0,4,H-16,18); s.line(38,y,W-12,y); }
+  }
+
+  function drawSpectrum(fd){
+    const n=analyser.frequencyBinCount;
+    const nyq=audioCtx.sampleRate/2;
+    s.noFill();
+    s.beginShape();
+    s.stroke(110,180,170,180); s.strokeWeight(1.5);
+    let started=false;
+    for(let i=0;i<n;i++){
+      const hz=i/n*nyq;
+      if(hz<F_LO||hz>F_HI) continue;
+      const x=xFor(hz);
+      const y=s.map(fd[i],0,255,H-16,18);
+      if(!started){ s.vertex(x,H-16); started=true; }
+      s.vertex(x,y);
+    }
+    if(started) s.vertex(W-12,H-16);
+    s.endShape();
+    // 残光フィル
+    s.noStroke();
+    for(let i=0;i<n;i++){
+      const hz=i/n*nyq; if(hz<F_LO||hz>F_HI) continue;
+      const v=fd[i]; if(v<8) continue;
+      const x=xFor(hz), y=s.map(v,0,255,H-16,18);
+      s.fill(72,150,140, v*0.18); s.rect(x-1,y,2,H-16-y);
+    }
+  }
+
+  function drawIdle(){
+    s.noStroke(); s.fill(73,107,102,140);
+    s.textFont('monospace'); s.textSize(11); s.textAlign(s.CENTER,s.CENTER);
+    s.text('— idle —  送信で 2 本のキャリアが立ち上がります', W/2, H/2);
+  }
+
+  function marker(hz,col,lbl){
+    const x=xFor(hz);
+    s.stroke(col[0],col[1],col[2],150); s.strokeWeight(1);
+    s.drawingContext.setLineDash([3,4]); s.line(x,18,x,H-16); s.drawingContext.setLineDash([]);
+    s.noStroke(); s.fill(col[0],col[1],col[2]);
+    s.textFont('monospace'); s.textSize(10); s.textAlign(s.CENTER,s.BOTTOM);
+    s.text(lbl, x, 17);
+  }
+};
+
+// ビットセル / プログレスのハイライト更新（p5ループから呼ぶ）
+let _bitEls=null;
+function updateBitHighlight(curIdx, frac){
+  if(!_bitEls || _bitEls.length !== document.querySelectorAll('#bits .bit').length){
+    _bitEls = Array.from(document.querySelectorAll('#bits .bit'));
+  }
+  for(let i=0;i<_bitEls.length;i++){
+    const el=_bitEls[i];
+    el.classList.toggle('on', playing && i===curIdx);
+    el.classList.toggle('played', playing && i<curIdx);
+    if(!playing){ el.classList.remove('on'); el.classList.remove('played'); }
+  }
+  $('prog').style.width = (playing? frac*100 : 0).toFixed(1)+'%';
+}
+
+// 起動
+window.addEventListener('DOMContentLoaded', ()=>{
+  bindUI();
+  new p5(sketch);
+});
+</script>
+</body>
+</html>
