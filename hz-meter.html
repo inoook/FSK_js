@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Hz METER — マイク周波数メーター</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+<style>
+  :root{
+    --bg:#07100f; --panel:#0b1816; --panel2:#0f201d;
+    --line:rgba(86,128,121,.20);
+    --space:#38e1d6; --mark:#ffb454;
+    --ink:#e2f5f0; --dim:#6f928c; --dim2:#496b66;
+    --ok:#5ad18a; --warn:#ff6b6b;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box} html,body{margin:0}
+  body{
+    background:radial-gradient(1200px 600px at 50% -10%,#0d201d 0%,var(--bg) 60%);
+    color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased;
+    line-height:1.5;padding:18px 14px 60px;
+  }
+  .wrap{max-width:760px;margin:0 auto}
+  header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+  .logo{font-family:var(--mono);font-weight:700;letter-spacing:.16em;font-size:13px;color:var(--space);
+    border:1px solid var(--line);border-radius:6px;padding:5px 9px;box-shadow:inset 0 0 24px rgba(56,225,214,.06)}
+  .logo b{color:var(--mark)}
+  h1{font-size:15px;font-weight:600;margin:0}
+  .sub{font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:.04em}
+
+  /* ---- ヒーロー読み出し ---- */
+  .readout{position:relative;border:1px solid var(--line);border-radius:12px;
+    background:linear-gradient(180deg,#0c1a18,#081311);padding:22px 18px 18px;margin-bottom:14px;
+    box-shadow:inset 0 0 60px rgba(0,0,0,.45);overflow:hidden}
+  .readout .pill{position:absolute;top:12px;right:12px;font-family:var(--mono);font-size:10px;letter-spacing:.08em;
+    color:var(--dim);border:1px solid var(--line);border-radius:20px;padding:3px 10px;background:rgba(0,0,0,.25)}
+  .readout .pill.live{color:var(--ok);border-color:rgba(90,209,138,.4)}
+  .hzwrap{display:flex;align-items:baseline;justify-content:center;gap:10px;margin:6px 0 2px}
+  #hz{font-family:var(--mono);font-weight:700;font-size:clamp(54px,15vw,92px);line-height:1;
+    color:var(--space);text-shadow:0 0 26px rgba(56,225,214,.35);letter-spacing:.01em;
+    transition:opacity .15s;font-variant-numeric:tabular-nums}
+  #hz.idle{color:var(--dim2);text-shadow:none;opacity:.6}
+  .unit{font-family:var(--mono);font-size:20px;color:var(--dim)}
+  .secline{display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;
+    font-family:var(--mono);font-size:12px;color:var(--dim);min-height:18px}
+  .secline #khz{color:var(--dim2)}
+  .secline #note b{color:var(--ink);font-weight:600}
+  .secline .cents.flat{color:var(--space)} .secline .cents.sharp{color:var(--mark)}
+  .level{height:4px;background:var(--line);border-radius:4px;margin:16px auto 0;max-width:320px;overflow:hidden}
+  .level > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--space),var(--mark))}
+
+  /* ---- スコープ ---- */
+  .scope{position:relative;border:1px solid var(--line);border-radius:10px;
+    background:linear-gradient(180deg,#0a1715,#081210);overflow:hidden;margin-bottom:14px;
+    box-shadow:inset 0 0 60px rgba(0,0,0,.5)}
+  #scopeHolder canvas{display:block;width:100%!important;height:auto!important}
+  .scopeTag{position:absolute;top:9px;left:11px;z-index:2;font-family:var(--mono);font-size:10px;letter-spacing:.13em;color:var(--dim)}
+
+  /* ---- コントロール ---- */
+  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  button{font-family:var(--mono);font-size:13px;letter-spacing:.05em;border-radius:8px;padding:12px 18px;cursor:pointer;
+    border:1px solid var(--line);background:var(--panel2);color:var(--ink);transition:.12s}
+  button:hover{border-color:var(--dim)}
+  button.primary{background:var(--space);color:#04120f;border-color:var(--space);font-weight:700}
+  button.primary.on{background:var(--warn);border-color:var(--warn);color:#1a0303}
+  .gate{display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:10px;color:var(--dim);
+    background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:9px 12px;flex:1;min-width:200px}
+  .gate input{flex:1;-webkit-appearance:none;appearance:none;height:3px;border-radius:3px;background:var(--line)}
+  .gate input::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--ink);border:2px solid var(--bg);cursor:pointer}
+  .gate input::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--ink);border:2px solid var(--bg);cursor:pointer}
+
+  .status{font-family:var(--mono);font-size:11px;color:var(--dim);min-height:16px;margin:2px 2px}
+  .status.err{color:var(--warn)}
+  footer{font-family:var(--mono);font-size:10px;color:var(--dim2);margin-top:20px;line-height:1.7}
+  footer .k{color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">Hz·<b>METER</b></div>
+    <div>
+      <h1>マイク周波数メーター</h1>
+      <div class="sub">dominant frequency · FFT peak + parabolic interpolation</div>
+    </div>
+  </header>
+
+  <!-- ヒーロー：Hz読み出し -->
+  <div class="readout">
+    <div class="pill" id="pill">IDLE</div>
+    <div class="hzwrap"><span id="hz" class="idle">—</span><span class="unit">Hz</span></div>
+    <div class="secline">
+      <span id="khz"></span>
+      <span id="note"></span>
+      <span id="cents" class="cents"></span>
+    </div>
+    <div class="level"><i id="lvl"></i></div>
+  </div>
+
+  <!-- スコープ：対数スペクトラム + ピッチ履歴 -->
+  <div class="scope">
+    <div class="scopeTag">SPECTRUM (log Hz) · ピーク追従</div>
+    <div id="scopeHolder"></div>
+  </div>
+
+  <!-- コントロール -->
+  <div class="row">
+    <button class="primary" id="mic">● 計測開始</button>
+    <div class="gate">無音しきい値 <input id="gate" type="range" min="0" max="100" step="1" value="22"> <span id="gatev">22</span></div>
+  </div>
+  <div class="status" id="status">待機中 — 「計測開始」を押してマイクを許可してください。</div>
+
+  <footer>
+    <div><span class="k">方式:</span> AnalyserNode(fftSize 8192)の振幅スペクトルから最大ピークを検出し、放物線補間でサブHz精度に。検出周波数を音名(A4=440)に換算して表示。</div>
+    <div><span class="k">範囲:</span> 50Hz〜ナイキスト(約24kHz)。純音(口笛・音叉・FSKトーン等)で最も正確。声や和音では「最も強い成分」を表示します。</div>
+    <div><span class="k">注:</span> マイクはHTTPS環境かつ許可が必要です。iframe内でブロックされる場合はHTMLをローカル/自分のサイトで開いてください。</div>
+  </footer>
+</div>
+
+<script>
+/* =========================================================
+   オーディオ
+   ========================================================= */
+let audioCtx=null, analyser=null, micStream=null, source=null, running=false;
+let freqDb=null, timeBuf=null;
+const NOTE_NAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+
+// 検出状態（描画＆DOMで共有）
+const det={ active:false, hz:0, level:0, prom:0 };
+let hzHist=[];          // {f|null} の履歴（履歴バンド用）
+let medBuf=[];          // 表示安定化用の直近検出
+
+async function start(){
+  try{
+    audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==='suspended') await audioCtx.resume();
+    micStream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+    source = audioCtx.createMediaStreamSource(micStream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 8192;
+    analyser.smoothingTimeConstant = 0.2;
+    analyser.minDecibels = -100; analyser.maxDecibels = -10;
+    source.connect(analyser);              // 出力には繋がない（ハウリング防止）
+    freqDb = new Float32Array(analyser.frequencyBinCount);
+    timeBuf = new Float32Array(analyser.fftSize);
+    running = true;
+    $('mic').textContent='■ 計測停止'; $('mic').classList.add('on');
+    setStatus('計測中 — 音を入力してください。');
+  }catch(err){
+    setStatus('マイクを起動できません: '+err.message+'　HTMLをローカル/自サイト(HTTPS)で開いてください。', true);
+  }
+}
+function stop(){
+  running=false; det.active=false;
+  if(source){ source.disconnect(); source=null; }
+  if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; }
+  $('mic').textContent='● 計測開始'; $('mic').classList.remove('on');
+  setStatus('停止しました。');
+}
+
+/* =========================================================
+   周波数検出：FFTピーク + 放物線補間
+   ========================================================= */
+function analyze(){
+  const sr=audioCtx.sampleRate, n=analyser.frequencyBinCount, binHz=sr/2/n;
+
+  // レベル（RMS）
+  analyser.getFloatTimeDomainData(timeBuf);
+  let sum=0; for(let i=0;i<timeBuf.length;i++) sum+=timeBuf[i]*timeBuf[i];
+  const rms=Math.sqrt(sum/timeBuf.length);
+  const dbfs=20*Math.log10(rms+1e-9);
+  det.level=Math.max(0,Math.min(1,(dbfs+60)/60));   // -60..0dB → 0..1
+
+  // スペクトル（dB）
+  analyser.getFloatFrequencyData(freqDb);
+  const minHz=50, maxHz=Math.min(sr/2, 24000);
+  const kMin=Math.max(1,Math.floor(minHz/binHz)), kMax=Math.min(n-2,Math.floor(maxHz/binHz));
+
+  let kPeak=-1, vPeak=-Infinity, avg=0, cnt=0;
+  for(let k=kMin;k<=kMax;k++){
+    const v=freqDb[k];
+    if(!isFinite(v)) continue;
+    avg+=v; cnt++;
+    if(v>vPeak){ vPeak=v; kPeak=k; }
+  }
+  avg = cnt? avg/cnt : -100;
+  const prom = vPeak - avg;                          // ピークの突出量(dB)
+
+  // 放物線補間
+  let freq=0;
+  if(kPeak>0){
+    const y0=freqDb[kPeak-1], y1=freqDb[kPeak], y2=freqDb[kPeak+1];
+    let d=0; const den=(y0-2*y1+y2);
+    if(isFinite(y0)&&isFinite(y2)&&Math.abs(den)>1e-9){ d=0.5*(y0-y2)/den; if(!isFinite(d)) d=0; d=Math.max(-0.5,Math.min(0.5,d)); }
+    freq=(kPeak+d)*binHz;
+  }
+
+  // ゲート判定
+  const gate=+$('gate').value;                        // 0..100
+  const levelGate = gate/100*0.5;                     // RMSしきい値(目安)
+  const active = running && rms>Math.max(0.0008, levelGate*0.02) && prom>8 && freq>0;
+
+  det.active=active; det.prom=prom;
+  if(active){
+    medBuf.push(freq); if(medBuf.length>5) medBuf.shift();
+    det.hz = median(medBuf);
+  } else {
+    medBuf.length=0;
+  }
+
+  // 履歴（1フレーム1点）
+  hzHist.push(active?det.hz:null);
+}
+
+/* =========================================================
+   ユーティリティ
+   ========================================================= */
+const $=id=>document.getElementById(id);
+function median(a){ const b=[...a].sort((x,y)=>x-y); const m=b.length>>1; return b.length%2?b[m]:(b[m-1]+b[m])/2; }
+function setStatus(t,err){ const s=$('status'); s.textContent=t; s.classList.toggle('err',!!err); }
+function noteInfo(f){
+  if(f<=0) return null;
+  const midi=Math.round(69+12*Math.log2(f/440));
+  const ref=440*Math.pow(2,(midi-69)/12);
+  const cents=Math.round(1200*Math.log2(f/ref));
+  const name=NOTE_NAMES[((midi%12)+12)%12], oct=Math.floor(midi/12)-1;
+  return {name,oct,cents};
+}
+
+/* =========================================================
+   DOM更新
+   ========================================================= */
+function paintDOM(){
+  const hzEl=$('hz'), pill=$('pill');
+  if(det.active){
+    const f=det.hz;
+    hzEl.textContent = f<1000? f.toFixed(1) : f.toFixed(0);
+    hzEl.classList.remove('idle');
+    $('khz').textContent = f>=1000? '('+(f/1000).toFixed(3)+' kHz)' : '';
+    const ni=noteInfo(f);
+    if(ni){
+      $('note').innerHTML = '≈ <b>'+ni.name+ni.oct+'</b>';
+      const c=$('cents'); const s=ni.cents>0?'+':''; c.textContent=s+ni.cents+'¢';
+      c.className='cents '+(ni.cents>0?'sharp':(ni.cents<0?'flat':''));
+    }
+    pill.textContent='● SIGNAL'; pill.className='pill live';
+  }else{
+    hzEl.textContent='—'; hzEl.classList.add('idle');
+    $('khz').textContent=''; $('note').textContent=''; $('cents').textContent='';
+    pill.textContent = running? 'LISTENING':'IDLE'; pill.className='pill'+(running?' live':'');
+  }
+  $('lvl').style.width=(det.level*100).toFixed(0)+'%';
+}
+
+/* =========================================================
+   p5.js スコープ（対数スペクトラム + ピッチ履歴）
+   ========================================================= */
+const sketch=(s)=>{
+  let W=700,H=260;
+  const F_LO=50, F_HI=24000;
+  const SPEC_TOP=20, SPEC_BOT=176, HIST_TOP=190, HIST_BOT=250;
+  const X0=42, X1=()=>W-14;
+
+  s.setup=()=>{ const h=$('scopeHolder'); W=h.clientWidth||700; const c=s.createCanvas(W,H); c.parent(h); s.pixelDensity(Math.min(window.devicePixelRatio||1,2)); };
+  s.windowResized=()=>{ const h=$('scopeHolder'); W=h.clientWidth||700; s.resizeCanvas(W,H); trimHist(); };
+
+  const lx=hz=>{ const v=Math.log10(Math.max(F_LO,Math.min(F_HI,hz))); return s.map(v,Math.log10(F_LO),Math.log10(F_HI),X0,X1()); };
+  const ly=hz=>{ const v=Math.log10(Math.max(F_LO,Math.min(F_HI,hz))); return s.map(v,Math.log10(F_LO),Math.log10(F_HI),HIST_BOT,HIST_TOP); };
+
+  s.draw=()=>{
+    if(running && analyser) analyze();
+    trimHist();
+    s.background(8,18,16);
+    gridSpec();
+    if(running && analyser) drawSpectrum(); else idle();
+    drawPeak();
+    histBand();
+  };
+
+  function gridSpec(){
+    const labels=[50,100,200,500,1000,2000,5000,10000,20000];
+    s.textFont('monospace'); s.textSize(9);
+    for(const f of labels){
+      const x=lx(f); s.stroke(86,128,121,34); s.strokeWeight(1); s.line(x,SPEC_TOP,x,SPEC_BOT);
+      s.noStroke(); s.fill(73,107,102); s.textAlign(s.CENTER,s.TOP);
+      s.text(f>=1000?(f/1000)+'k':f, x, SPEC_BOT+3);
+    }
+    // 履歴バンド枠
+    s.noFill(); s.stroke(86,128,121,22); s.strokeWeight(1); s.rect(X0,HIST_TOP,X1()-X0,HIST_BOT-HIST_TOP);
+    s.noStroke(); s.fill(73,107,102); s.textAlign(s.LEFT,s.TOP); s.text('TRACK', X0,HIST_TOP-12);
+  }
+
+  function drawSpectrum(){
+    const sr=audioCtx.sampleRate, n=analyser.frequencyBinCount, binHz=sr/2/n;
+    s.noFill(); s.stroke(110,180,170,180); s.strokeWeight(1.4); s.beginShape();
+    s.vertex(X0,SPEC_BOT);
+    let prevX=-99;
+    for(let k=1;k<n;k++){
+      const hz=k*binHz; if(hz<F_LO||hz>F_HI) continue;
+      const x=lx(hz); if(x-prevX<0.6 && k<n-1) continue; prevX=x;
+      const db=isFinite(freqDb[k])?freqDb[k]:-100;
+      const y=s.map(db,-100,-10,SPEC_BOT,SPEC_TOP,true);
+      s.vertex(x,y);
+    }
+    s.vertex(X1(),SPEC_BOT); s.endShape();
+    // 残光フィル
+    s.noStroke(); s.fill(72,150,140,26);
+    for(let k=1;k<n;k++){
+      const hz=k*binHz; if(hz<F_LO||hz>F_HI) continue;
+      const db=isFinite(freqDb[k])?freqDb[k]:-100; if(db<-90) continue;
+      const x=lx(hz), y=s.map(db,-100,-10,SPEC_BOT,SPEC_TOP,true);
+      s.rect(x-0.8,y,1.6,SPEC_BOT-y);
+    }
+  }
+
+  function idle(){ s.noStroke(); s.fill(73,107,102,140); s.textFont('monospace'); s.textSize(11); s.textAlign(s.CENTER,s.CENTER);
+    s.text(running?'— listening —':'— idle —', (X0+W-14)/2,(SPEC_TOP+SPEC_BOT)/2); }
+
+  function drawPeak(){
+    if(!det.active) return;
+    const x=lx(det.hz);
+    s.stroke(56,225,214,180); s.strokeWeight(1);
+    s.drawingContext.setLineDash([3,4]); s.line(x,SPEC_TOP,x,SPEC_BOT); s.drawingContext.setLineDash([]);
+    s.noStroke(); s.fill(56,225,214);
+    s.textFont('monospace'); s.textSize(10); s.textAlign(x>W-70?s.RIGHT:s.LEFT, s.TOP);
+    const lbl=(det.hz<1000?det.hz.toFixed(1):det.hz.toFixed(0))+'Hz';
+    s.text(lbl, x+(x>W-70?-4:4), SPEC_TOP+2);
+    // ピーク点
+    s.fill(56,225,214); s.circle(x,SPEC_TOP+16,4);
+  }
+
+  function histBand(){
+    const w=X1()-X0;
+    s.strokeWeight(1.6); s.noFill();
+    let drawing=false;
+    for(let i=0;i<hzHist.length;i++){
+      const f=hzHist[i]; const x=X0+i;
+      if(f==null){ if(drawing){ s.endShape(); drawing=false; } continue; }
+      const col = colorFor(f);
+      if(!drawing){ s.stroke(col); s.beginShape(); drawing=true; }
+      s.stroke(col);
+      s.vertex(x, ly(f));
+    }
+    if(drawing) s.endShape();
+    // 現在値マーカ
+    if(det.active){ const y=ly(det.hz); s.noStroke(); s.fill(56,225,214); s.circle(X1()-1,y,4); }
+  }
+  function colorFor(f){
+    // 低域→cyan, 高域→amber のグラデーション(対数)
+    const t=s.constrain((Math.log10(f)-Math.log10(F_LO))/(Math.log10(F_HI)-Math.log10(F_LO)),0,1);
+    return s.lerpColor(s.color(56,225,214), s.color(255,180,84), t);
+  }
+
+  function trimHist(){ const max=Math.max(60,(X1()-X0)|0); if(hzHist.length>max) hzHist.splice(0,hzHist.length-max); }
+};
+
+/* =========================================================
+   メインループ（DOM更新はrAFで）
+   ========================================================= */
+function loop(){ paintDOM(); requestAnimationFrame(loop); }
+
+window.addEventListener('DOMContentLoaded',()=>{
+  $('mic').addEventListener('click',()=> running?stop():start());
+  $('gate').addEventListener('input',()=>$('gatev').textContent=$('gate').value);
+  new p5(sketch);
+  loop();
+});
+</script>
+</body>
+</html>
