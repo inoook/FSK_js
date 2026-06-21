@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FSK ENCODER v7 — 可聴域チャープ同期 / data-transmission</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+<style>
+  :root{--bg:#000;--ink:#fff;--dim:#8a8a8a;--dim2:#555;--line:rgba(255,255,255,.20);--line2:rgba(255,255,255,.08);--panel:#070707;
+    --mono:ui-monospace,"SF Mono","Roboto Mono",Menlo,Consolas,monospace;}
+  *{box-sizing:border-box;border-radius:0}html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--mono);-webkit-font-smoothing:antialiased;line-height:1.5;padding:0}
+  .wrap{max-width:780px;margin:0 auto;padding:20px 16px 70px}
+  header{border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:18px}
+  .brand{display:flex;align-items:baseline;gap:10px;font-weight:700;letter-spacing:.34em;font-size:13px}
+  .brand .sl{color:var(--dim2)}.brand .tx{color:var(--ink)}.brand .v{margin-left:auto;color:var(--dim);letter-spacing:.2em;font-size:11px}
+  h1{font-size:12px;font-weight:400;letter-spacing:.22em;text-transform:uppercase;color:var(--ink);margin:10px 0 3px}
+  .sub{font-size:10px;color:var(--dim);letter-spacing:.16em;text-transform:uppercase}
+  .scope{position:relative;border:1px solid var(--line);background:#000;overflow:hidden;margin-bottom:16px}
+  #scopeHolder canvas{display:block;width:100%!important;height:auto!important}
+  .scopeTag{position:absolute;top:8px;left:10px;z-index:2;font-size:9px;letter-spacing:.22em;color:var(--dim);text-transform:uppercase}
+  .legend{position:absolute;top:8px;right:10px;z-index:2;font-size:9px;letter-spacing:.14em;display:flex;gap:13px;color:var(--dim)}
+  .legend i{display:inline-block;width:9px;height:9px;margin-right:5px;vertical-align:-1px}
+  .legend .b1{background:var(--ink)}.legend .b0{border:1px solid var(--dim)}.legend .c{border:1px dotted var(--ink)}
+  .field{margin-bottom:14px}
+  label.cap{display:block;font-size:9px;letter-spacing:.2em;color:var(--dim);text-transform:uppercase;margin-bottom:7px}
+  textarea{width:100%;min-height:56px;resize:vertical;background:#000;color:var(--ink);border:1px solid var(--line);font-family:var(--mono);font-size:15px;letter-spacing:.04em;padding:11px 12px}
+  textarea:focus{outline:none;border-color:var(--ink)}
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line);border:1px solid var(--line)}
+  @media(min-width:560px){.grid{grid-template-columns:repeat(4,1fr)}}
+  .ctrl{background:#000;padding:11px 12px}
+  .ctrl .row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px}
+  .ctrl .name{font-size:9px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase}.ctrl .val{font-size:13px;color:var(--ink)}.ctrl .val .u{color:var(--dim2);font-size:10px}
+  input[type=range]{width:100%;-webkit-appearance:none;appearance:none;height:1px;background:rgba(255,255,255,.28);margin:7px 0 1px}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;background:var(--ink);border:none;cursor:pointer}
+  input[type=range]::-moz-range-thumb{width:11px;height:11px;background:var(--ink);border:none;border-radius:0;cursor:pointer}
+  .opts{display:flex;gap:18px;flex-wrap:wrap;font-size:11px;color:var(--dim);margin:14px 1px;align-items:center;letter-spacing:.08em}
+  .opts label{display:flex;align-items:center;gap:7px;cursor:pointer;text-transform:uppercase}.opts input[type=checkbox]{accent-color:#fff;width:14px;height:14px}
+  .panel{border:1px solid var(--line);padding:13px 14px;margin-bottom:14px}
+  .panel h2{font-size:10px;letter-spacing:.2em;color:var(--dim);margin:0 0 11px;text-transform:uppercase;display:flex;align-items:center;gap:9px}
+  .panel h2 .tag{border:1px solid var(--line);padding:1px 6px;font-size:9px;letter-spacing:.12em;color:var(--ink)}
+  .panel .line{display:flex;align-items:center;gap:11px;font-size:10px;color:var(--dim);margin-top:9px;letter-spacing:.08em;text-transform:uppercase}
+  .panel .line input[type=range]{flex:1}.panel .line span.rd{color:var(--ink);min-width:42px;text-transform:none}
+  .actions{display:flex;gap:1px;background:var(--line);border:1px solid var(--line);margin:2px 0 16px}
+  button{flex:1;font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;padding:13px 10px;cursor:pointer;border:none;background:#000;color:var(--ink);transition:background .1s,color .1s}
+  button:hover{background:var(--ink);color:#000}button.primary{background:var(--ink);color:#000;font-weight:700}button.primary:hover{background:var(--dim);color:#000}
+  .readout{border:1px solid var(--line);padding:14px}
+  .meta{display:grid;grid-template-columns:repeat(2,1fr);gap:9px 18px;font-size:10px;color:var(--dim);letter-spacing:.1em;text-transform:uppercase}
+  @media(min-width:560px){.meta{grid-template-columns:repeat(4,1fr)}}
+  .meta b{color:var(--ink);font-weight:400;text-transform:none;letter-spacing:.02em}
+  .hex{font-size:10px;color:var(--dim);word-break:break-all;line-height:1.8;margin-top:13px;border-top:1px solid var(--line2);padding-top:11px}
+  .hex .len{color:var(--ink)}.hex .pay{color:var(--ink)}.hex .crc{color:var(--dim)}
+  footer{font-size:9.5px;color:var(--dim2);margin-top:22px;line-height:1.9;letter-spacing:.04em;border-top:1px solid var(--line2);padding-top:14px}footer .k{color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><span>FSK</span><span class="sl">/</span><span class="tx">TX</span><span class="v">v7 · AUDIBLE</span></div>
+    <h1>可聴域チャープ同期 データ音響送信</h1>
+    <div class="sub">LFM chirp lead-in · CPFSK · Hamming(7,4) · CRC-16 · channel sim</div>
+  </header>
+
+  <div class="scope">
+    <div class="scopeTag">SPECTRUM / kHz</div>
+    <div class="legend"><span><i class="b0"></i>0</span><span><i class="b1"></i>1</span><span><i class="c"></i>CHIRP</span></div>
+    <div id="scopeHolder"></div>
+  </div>
+
+  <div class="field">
+    <label class="cap" for="msg">MESSAGE — UTF-8 / max 120</label>
+    <textarea id="msg" maxlength="120" spellcheck="false">FSK v7</textarea>
+  </div>
+
+  <div class="grid">
+    <div class="ctrl"><div class="row"><span class="name">F0 · bit 0</span><span class="val"><span id="f0v">3000</span><span class="u"> Hz</span></span></div><input id="f0" type="range" min="500" max="7000" step="20" value="3000"></div>
+    <div class="ctrl"><div class="row"><span class="name">F1 · bit 1</span><span class="val"><span id="f1v">4000</span><span class="u"> Hz</span></span></div><input id="f1" type="range" min="500" max="7000" step="20" value="4000"></div>
+    <div class="ctrl"><div class="row"><span class="name">Baud</span><span class="val"><span id="bdv">100</span><span class="u"> bps</span></span></div><input id="bd" type="range" min="20" max="300" step="5" value="100"></div>
+    <div class="ctrl"><div class="row"><span class="name">Volume</span><span class="val"><span id="vlv">30</span><span class="u"> %</span></span></div><input id="vl" type="range" min="0" max="100" step="1" value="30"></div>
+  </div>
+
+  <div class="opts">
+    <label><input type="checkbox" id="fec" checked> FEC error-correction</label>
+  </div>
+
+  <div class="panel">
+    <h2>LEAD-IN CHIRP<span class="tag">v7 · matched filter</span></h2>
+    <div class="line"><label style="display:flex;gap:7px;align-items:center;text-transform:uppercase"><input type="checkbox" id="chirp" checked> prepend chirp</label></div>
+    <div class="line">F_START <input id="cf0" type="range" min="300" max="7000" step="20" value="1000"> <span class="rd"><span id="cf0v">1000</span> Hz</span></div>
+    <div class="line">F_END&nbsp;&nbsp; <input id="cf1" type="range" min="300" max="7000" step="20" value="6000"> <span class="rd"><span id="cf1v">6000</span> Hz</span></div>
+    <div class="line">LENGTH&nbsp; <input id="cdur" type="range" min="20" max="300" step="5" value="120"> <span class="rd"><span id="cdurv">120</span> ms</span></div>
+    <div class="line">GUARD&nbsp;&nbsp; <input id="cguard" type="range" min="0" max="150" step="5" value="40"> <span class="rd"><span id="cguardv">40</span> ms</span></div>
+  </div>
+
+  <div class="panel">
+    <h2>CHANNEL SIMULATOR — applied to whole signal</h2>
+    <div class="line"><label style="display:flex;gap:7px;align-items:center;text-transform:uppercase"><input type="checkbox" id="noiseOn"> white noise</label>
+      SNR <input id="snr" type="range" min="-22" max="20" step="1" value="-12"> <span class="rd"><span id="snrv">-12</span> dB</span></div>
+    <div class="line"><label style="display:flex;gap:7px;align-items:center;text-transform:uppercase"><input type="checkbox" id="dropOn"> burst drop</label>
+      N <input id="drop" type="range" min="0" max="8" step="1" value="2"> <span class="rd"><span id="dropv">2</span> ×3sym</span></div>
+  </div>
+
+  <div class="actions">
+    <button class="primary" id="tx">▶ TRANSMIT</button>
+    <button id="wav">⤓ WAV</button>
+    <button id="stop">■ STOP</button>
+  </div>
+
+  <div class="readout">
+    <div class="meta">
+      <span>MODE <b id="mMode">FEC</b></span>
+      <span>PAYLOAD <b id="mPay">0</b> B</span>
+      <span>RATE <b id="mRate">4/7</b></span>
+      <span>BITS <b id="mBits">0</b></span>
+      <span>LEAD-IN <b id="mLead">—</b> ms</span>
+      <span>BODY <b id="mBody">0.00</b> s</span>
+      <span>TOTAL <b id="mTotal">0.00</b> s</span>
+      <span>VS RAW <b id="mVs">—</b></span>
+    </div>
+    <div class="hex" id="hex"></div>
+  </div>
+
+  <footer>
+    <div><span class="k">CHIRP /</span> 可聴域の線形周波数スイープ(LFM)を本体前に前置き。受信側(v7)が整合フィルタの相関ピークでフレーム先頭とシンボルクロックを高精度推定するための同期信号。可聴域は帯域を広く取れるため相関ピークが鋭くなります。</div>
+    <div><span class="k">FEC /</span> [AA×4]preamble · [SYNC] · Hamming(7,4)でLENと(payload+CRC16)を符号化、本体は列インターリーブ。受信側は単一ビット誤りを符号語ごとに訂正。</div>
+    <div><span class="k">NOTE /</span> 送信側のみ(v7 TX)。整合フィルタ復号器はv7 RX。可聴域はスマホのノイズ抑制/AGCの影響を受けやすいので、WAV経由のテストを推奨。</div>
+  </footer>
+</div>
+
+<script>
+/* ============ 検証済みコーデック ============ */
+const PREAMBLE_BYTE=0xAA,PREAMBLE_COUNT=4,SYNC_FEC=0x7E2D,SYNC_RAW=0x81D2;
+function crc16(b){let c=0xFFFF;for(const x of b){c^=(x<<8)&0xFFFF;for(let i=0;i<8;i++)c=(c&0x8000)?((c<<1)^0x1021)&0xFFFF:(c<<1)&0xFFFF;}return c&0xFFFF;}
+function hammingEncode(nib){const d=[(nib>>3)&1,(nib>>2)&1,(nib>>1)&1,nib&1],c=new Array(8).fill(0);c[3]=d[0];c[5]=d[1];c[6]=d[2];c[7]=d[3];c[1]=c[3]^c[5]^c[7];c[2]=c[3]^c[6]^c[7];c[4]=c[5]^c[6]^c[7];return [c[1],c[2],c[3],c[4],c[5],c[6],c[7]];}
+function byteToBits(b){const o=[];for(let i=7;i>=0;i--)o.push((b>>i)&1);return o;}
+function bytesToNibbles(by){const o=[];for(const b of by)o.push((b>>4)&0xF,b&0xF);return o;}
+function wordBits(w){const o=[];for(let i=15;i>=0;i--)o.push((w>>i)&1);return o;}
+function preambleBits(){const o=[];for(let i=0;i<PREAMBLE_COUNT;i++)o.push(...byteToBits(PREAMBLE_BYTE));return o;}
+function interleave(cw){const M=cw.length,o=[];for(let col=0;col<7;col++)for(let j=0;j<M;j++)o.push(cw[j][col]);return o;}
+function buildFEC(pl){const LEN=pl.length,crc=crc16([LEN,...pl]),info=[...pl,(crc>>8)&0xFF,crc&0xFF];
+  const cw=bytesToNibbles(info).map(hammingEncode),body=interleave(cw),hdr=bytesToNibbles([LEN]).map(hammingEncode),hdrBits=[].concat(...hdr);
+  return [...preambleBits(),...wordBits(SYNC_FEC),...hdrBits,...body];}
+function buildRAW(pl){const LEN=pl.length,crc=crc16([LEN,...pl]),bytes=[LEN,...pl,(crc>>8)&0xFF,crc&0xFF];
+  const o=[...preambleBits(),...wordBits(SYNC_RAW)];for(const b of bytes)o.push(...byteToBits(b));return o;}
+
+/* ============ モデム ============ */
+function modulate(bits,sr,f0,f1,baud,amp){const spb=Math.round(sr/baud),data=new Float32Array(bits.length*spb);let ph=0,idx=0;
+  for(const bit of bits){const f=bit?f1:f0,d=2*Math.PI*f/sr;for(let i=0;i<spb;i++){data[idx++]=Math.sin(ph)*amp;ph+=d;if(ph>2*Math.PI)ph-=2*Math.PI;}}
+  const fade=Math.min((sr*0.005)|0,(data.length/2)|0);for(let i=0;i<fade;i++){const g=i/fade;data[i]*=g;data[data.length-1-i]*=g;}return data;}
+
+/* ============ リードイン・チャープ ============ */
+function genChirp(fa,fb,sec,sr,amp){
+  const n=Math.max(1,Math.round(sr*sec)),o=new Float32Array(n),k=(fb-fa)/sec;
+  for(let i=0;i<n;i++){const t=i/sr;o[i]=Math.sin(2*Math.PI*(fa*t+0.5*k*t*t))*amp;}
+  const f=Math.min((sr*0.005)|0,(n/2)|0);for(let i=0;i<f;i++){const g=0.5-0.5*Math.cos(Math.PI*i/f);o[i]*=g;o[n-1-i]*=g;}
+  return o;}
+function concatF32(...arrs){let n=0;for(const a of arrs)n+=a.length;const o=new Float32Array(n);let p=0;for(const a of arrs){o.set(a,p);p+=a.length;}return o;}
+function leadin(sr,p){if(!p.chirp)return new Float32Array(0);
+  const chirp=genChirp(p.cf0,p.cf1,p.cdur/1000,sr,p.amp),guard=new Float32Array(Math.max(0,Math.round(sr*p.cguard/1000)));
+  return concatF32(chirp,guard);}
+function buildSignal(p,sr){const body=modulate(buildBits(p).bits,sr,p.f0,p.f1,p.baud,p.amp);return concatF32(leadin(sr,p),body);}
+
+/* ============ チャネルシミュレータ ============ */
+let _g2=null;function randn(){if(_g2!==null){const v=_g2;_g2=null;return v;}let u=0,v=0,s=0;do{u=Math.random()*2-1;v=Math.random()*2-1;s=u*u+v*v;}while(s===0||s>=1);const m=Math.sqrt(-2*Math.log(s)/s);_g2=v*m;return u*m;}
+function applyChannel(data,sr,baud,amp){
+  let out=data;
+  if($('noiseOn').checked){const snr=+$('snr').value,Ps=amp*amp/2,sigma=Math.sqrt(Ps/Math.pow(10,snr/10));out=Float32Array.from(out,x=>x+randn()*sigma);}
+  if($('dropOn').checked){const spb=Math.round(sr/baud),nb=+$('drop').value,bs=3;out=out.slice();
+    for(let b=0;b<nb;b++){const sSym=(Math.random()*Math.max(1,out.length/spb-bs))|0;for(let s=0;s<bs;s++){const o=(sSym+s)*spb;for(let i=0;i<spb&&o+i<out.length;i++)out[o+i]=0;}}}
+  return out;
+}
+
+/* ============ 状態・UI ============ */
+const $=id=>document.getElementById(id);
+let audioCtx=null,analyser=null,source=null,playing=false,playStart=0,playDur=0;
+function ctx(){if(!audioCtx){audioCtx=new (window.AudioContext||window.webkitAudioContext)();analyser=audioCtx.createAnalyser();analyser.fftSize=4096;analyser.smoothingTimeConstant=0.55;analyser.connect(audioCtx.destination);}return audioCtx;}
+function readP(){return{text:$('msg').value,f0:+$('f0').value,f1:+$('f1').value,baud:+$('bd').value,amp:(+$('vl').value)/100,fec:$('fec').checked,
+  chirp:$('chirp').checked,cf0:+$('cf0').value,cf1:+$('cf1').value,cdur:+$('cdur').value,cguard:+$('cguard').value};}
+function buildBits(p){const pl=Array.from(new TextEncoder().encode(p.text)).slice(0,255);return {pl, bits:p.fec?buildFEC(pl):buildRAW(pl)};}
+
+function preview(){
+  const p=readP();const {pl}=buildBits(p);
+  const fecBits=buildFEC(pl).length, rawBits=buildRAW(pl).length, bits1=p.fec?fecBits:rawBits;
+  const bodyDur=bits1/p.baud, leadDur=p.chirp?(p.cdur+p.cguard)/1000:0, total=bodyDur+leadDur;
+  $('mMode').textContent=p.fec?'FEC':'RAW';
+  $('mPay').textContent=pl.length;
+  $('mRate').textContent=p.fec?'4/7':'1/1';
+  $('mBits').textContent=bits1;
+  $('mLead').textContent=p.chirp?(p.cdur+p.cguard):'—';
+  $('mBody').textContent=bodyDur.toFixed(2);
+  $('mTotal').textContent=total.toFixed(2);
+  $('mVs').textContent=p.fec?('×'+(fecBits/rawBits).toFixed(2)):'baseline';
+  const crc=crc16([pl.length,...pl]);
+  let html=`<span class="len">LEN ${pl.length.toString(16).padStart(2,'0').toUpperCase()}</span> · <span class="pay">`+
+    pl.map(b=>b.toString(16).padStart(2,'0').toUpperCase()).join(' ')+`</span> · <span class="crc">CRC16 ${crc.toString(16).padStart(4,'0').toUpperCase()}</span>`;
+  $('hex').innerHTML=html;
+}
+
+function transmit(){
+  const p=readP();const c=ctx();if(c.state==='suspended')c.resume();
+  if(source){try{source.stop();}catch(e){}source=null;}
+  let data=buildSignal(p,c.sampleRate);
+  data=applyChannel(data,c.sampleRate,p.baud,p.amp);
+  const ab=c.createBuffer(1,data.length,c.sampleRate);ab.copyToChannel(data,0);
+  source=c.createBufferSource();source.buffer=ab;source.connect(analyser);source.onended=()=>{playing=false;};
+  playStart=c.currentTime;playDur=data.length/c.sampleRate;playing=true;source.start();
+}
+function stopAudio(){if(source){try{source.stop();}catch(e){}source.disconnect();source=null;}playing=false;}
+
+function encodeWAV(data,sr){const n=data.length,buf=new ArrayBuffer(44+n*2),v=new DataView(buf);const ws=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i));};
+  ws(0,'RIFF');v.setUint32(4,36+n*2,true);ws(8,'WAVE');ws(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,sr,true);v.setUint32(28,sr*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);ws(36,'data');v.setUint32(40,n*2,true);
+  let o=44;for(let i=0;i<n;i++){let s=Math.max(-1,Math.min(1,data[i]));v.setInt16(o,s<0?s*0x8000:s*0x7FFF,true);o+=2;}return new Blob([buf],{type:'audio/wav'});}
+function downloadWAV(){const p=readP();const c=ctx();let data=buildSignal(p,c.sampleRate);data=applyChannel(data,c.sampleRate,p.baud,p.amp);
+  const cs=p.chirp?('_chirp'+p.cf0+'-'+p.cf1+'-'+p.cdur+'ms'):'';
+  const ch=($('noiseOn').checked?('_snr'+$('snr').value):'')+($('dropOn').checked?('_drop'+$('drop').value):'');
+  const url=URL.createObjectURL(encodeWAV(data,c.sampleRate));const a=document.createElement('a');a.href=url;a.download=`fsk_v7_${p.fec?'fec':'raw'}_${p.f0}-${p.f1}_${p.baud}bd${cs}${ch}.wav`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+
+/* ============ p5 スコープ（モノクローム） ============ */
+const sketch=s=>{let W=720,H=220,fd=null;const F_LO=300,F_HI=7700;
+  s.setup=()=>{const h=$('scopeHolder');W=h.clientWidth||720;const c=s.createCanvas(W,H);c.parent(h);s.pixelDensity(Math.min(window.devicePixelRatio||1,2));};
+  s.windowResized=()=>{const h=$('scopeHolder');W=h.clientWidth||720;s.resizeCanvas(W,H);};
+  const xF=hz=>s.map(hz,F_LO,F_HI,40,W-12);
+  s.draw=()=>{const p=readP();s.background(0);grid();
+    if(playing&&analyser){if(!fd)fd=new Uint8Array(analyser.frequencyBinCount);analyser.getByteFrequencyData(fd);spec(fd);}else idle();
+    if(p.chirp)chirpBand(p.cf0,p.cf1);
+    mk(p.f0,140,'0',[2,4]);mk(p.f1,255,'1',null);};
+  function grid(){s.stroke(255,255,255,26);s.strokeWeight(1);for(let k=1;k<=7;k++){const x=xF(k*1000);s.line(x,18,x,H-14);}s.noStroke();s.fill(120);s.textFont('monospace');s.textSize(9);s.textAlign(s.CENTER,s.TOP);for(let k=1;k<=7;k++)s.text(k,xF(k*1000),H-12);}
+  function spec(fd){const n=analyser.frequencyBinCount,nyq=audioCtx.sampleRate/2;s.noFill();s.stroke(240);s.strokeWeight(1.4);s.beginShape();let st=false;for(let i=0;i<n;i++){const hz=i/n*nyq;if(hz<F_LO||hz>F_HI)continue;const x=xF(hz),y=s.map(fd[i],0,255,H-16,18);if(!st){s.vertex(x,H-16);st=true;}s.vertex(x,y);}if(st)s.vertex(W-12,H-16);s.endShape();}
+  function idle(){s.noStroke();s.fill(110);s.textFont('monospace');s.textSize(10);s.textAlign(s.CENTER,s.CENTER);s.text('— IDLE —  TRANSMIT で chirp → body',W/2,H/2);}
+  function chirpBand(a,b){const xa=xF(Math.min(a,b)),xb=xF(Math.max(a,b));s.noFill();s.stroke(255,255,255,90);s.strokeWeight(1);s.drawingContext.setLineDash([1,3]);s.line(xa,18,xa,H-16);s.line(xb,18,xb,H-16);s.drawingContext.setLineDash([]);
+    s.fill(255,255,255,16);s.noStroke();s.rect(xa,18,xb-xa,7);s.fill(200);s.textFont('monospace');s.textSize(9);s.textAlign(s.LEFT,s.TOP);s.text('chirp '+(a<=b?'↗':'↘'),xa+3,19);}
+  function mk(hz,g,l,dash){const x=xF(hz);s.stroke(g);s.strokeWeight(1);if(dash)s.drawingContext.setLineDash(dash);s.line(x,18,x,H-16);s.drawingContext.setLineDash([]);s.noStroke();s.fill(g);s.textFont('monospace');s.textSize(10);s.textAlign(s.CENTER,s.BOTTOM);s.text(l,x,17);}
+};
+
+window.addEventListener('DOMContentLoaded',()=>{
+  const sync=()=>{$('f0v').textContent=$('f0').value;$('f1v').textContent=$('f1').value;$('bdv').textContent=$('bd').value;$('vlv').textContent=$('vl').value;$('snrv').textContent=$('snr').value;$('dropv').textContent=$('drop').value;
+    $('cf0v').textContent=$('cf0').value;$('cf1v').textContent=$('cf1').value;$('cdurv').textContent=$('cdur').value;$('cguardv').textContent=$('cguard').value;preview();};
+  ['msg','f0','f1','bd','vl','fec','noiseOn','snr','dropOn','drop','chirp','cf0','cf1','cdur','cguard'].forEach(id=>$(id).addEventListener('input',sync));
+  $('tx').addEventListener('click',transmit);$('wav').addEventListener('click',downloadWAV);$('stop').addEventListener('click',stopAudio);
+  new p5(sketch);sync();
+});
+</script>
+</body>
+</html>
