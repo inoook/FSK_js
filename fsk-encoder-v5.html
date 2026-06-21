@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FSK ENCODER v5 — 畳み込み符号 データ音響送信</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+<style>
+  :root{--bg:#000;--panel:#0a0a0a;--panel2:#111;--line:rgba(255,255,255,.14);
+    --f0:#ffffff;--f1:#888;--ink:#f4f4f4;--dim:#777;--dim2:#444;--ok:#fff;--warn:#ff3b30;--mid:#aaa;--accent:#fff;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--sans:ui-monospace,Menlo,Consolas,monospace;}
+  *{box-sizing:border-box}html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--mono);-webkit-font-smoothing:antialiased;line-height:1.5;padding:22px 16px 70px}
+  .wrap{max-width:760px;margin:0 auto}
+  header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:18px;border-bottom:1px solid var(--line);padding-bottom:14px}
+  .logo{font-family:var(--mono);font-weight:400;letter-spacing:.28em;font-size:12px;color:var(--ink);border:1px solid var(--line);padding:5px 10px}
+  .logo b{color:var(--ink);font-weight:700} .logo .v{color:var(--dim2);font-size:10px;margin-left:6px}
+  h1{font-size:13px;font-weight:400;margin:0;letter-spacing:.08em}.sub{font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:.14em}
+  .scope{position:relative;border:1px solid var(--line);background:#000;overflow:hidden;margin-bottom:14px}
+  #scopeHolder canvas{display:block;width:100%!important;height:auto!important}
+  .scopeTag{position:absolute;top:10px;left:12px;z-index:2;font-family:var(--mono);font-size:9px;letter-spacing:.22em;color:var(--dim)}
+  .legend{position:absolute;top:10px;right:12px;z-index:2;font-family:var(--mono);font-size:9px;letter-spacing:.1em;display:flex;gap:14px;color:var(--dim)}
+  .legend i{display:inline-block;width:7px;height:7px;margin-right:5px;vertical-align:middle}.legend .s{background:var(--f0)}.legend .m{background:var(--f1)}
+  .field{margin-bottom:14px}
+  label.cap{display:block;font-family:var(--mono);font-size:9px;letter-spacing:.22em;color:var(--dim);text-transform:uppercase;margin-bottom:7px}
+  textarea{width:100%;min-height:54px;resize:vertical;background:var(--panel);color:var(--ink);border:1px solid var(--line);font-family:var(--mono);font-size:15px;padding:11px 12px;letter-spacing:.02em}
+  textarea:focus{outline:none;border-color:var(--ink)}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line);margin-bottom:8px}
+  .grid.grid-2{grid-template-columns:repeat(2,1fr)}
+  .ctrl{background:var(--bg);padding:11px 12px}
+  .ctrl .row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+  .ctrl .name{font-family:var(--mono);font-size:9px;letter-spacing:.16em;color:var(--dim)}.ctrl .val{font-family:var(--mono);font-size:13px;color:var(--ink)}.ctrl .val .u{color:var(--dim2);font-size:10px}
+  input[type=range]{width:100%;-webkit-appearance:none;appearance:none;height:1px;background:var(--line);margin:6px 0 0}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;background:var(--ink);border:none;cursor:pointer;border-radius:0}
+  input[type=range]::-moz-range-thumb{width:11px;height:11px;background:var(--ink);border:none;cursor:pointer;border-radius:0}
+  .opts{display:flex;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--dim);margin:0 2px 14px;align-items:center;letter-spacing:.06em}
+  .opts label{display:flex;align-items:center;gap:7px;cursor:pointer}.opts input[type=checkbox]{accent-color:var(--ink);width:14px;height:14px}
+  .chan{background:var(--panel);border:1px solid var(--line);padding:13px 14px;margin-bottom:14px}
+  .chan h2{font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--dim);margin:0 0 11px;text-transform:uppercase}
+  .chan .line{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:9px;letter-spacing:.06em}
+  .chan .line input[type=range]{flex:1}
+  .actions{display:flex;gap:1px;flex-wrap:wrap;margin:4px 0 16px;background:var(--line);border:1px solid var(--line)}
+  button{font-family:var(--mono);font-size:12px;letter-spacing:.14em;padding:13px 20px;cursor:pointer;border:none;background:var(--bg);color:var(--ink);transition:.1s;flex:1;min-width:120px}
+  button:hover{background:var(--panel2)}button.primary{background:var(--ink);color:#000;font-weight:700}button.primary:hover{background:#ccc}
+  .readout{background:var(--panel);border:1px solid var(--line);padding:14px}
+  .meta{display:grid;grid-template-columns:repeat(2,1fr);gap:9px 18px;font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:.08em}
+  @media(min-width:560px){.meta{grid-template-columns:repeat(3,1fr)}}
+  .meta b{color:var(--ink);font-weight:700}
+  .hex{font-family:var(--mono);font-size:10px;color:var(--dim);word-break:break-all;line-height:1.8;margin-top:12px;letter-spacing:.02em}
+  .hex .len{color:var(--ink)}.hex .pay{color:var(--ink)}.hex .crc{color:var(--dim)}
+  footer{font-family:var(--mono);font-size:9px;color:var(--dim2);margin-top:22px;line-height:1.8;letter-spacing:.04em}footer .k{color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">FSK·<b>TX</b><span class="v">v5</span></div>
+    <div><h1>2-TONE SINE FSK ENCODER v5</h1>
+      <div class="sub">Conv(K=7,rate1/2)+interleave · CRC-16 · 2-FSK pure sine</div></div>
+  </header>
+
+  <div class="scope">
+    <div class="scopeTag">SPECTRUM</div>
+    <div class="legend"><span><i class="s"></i>F0 · 0</span><span><i class="m"></i>F1 · 1</span></div>
+    <div id="scopeHolder"></div>
+  </div>
+
+  <div class="field">
+    <label class="cap" for="msg">送信メッセージ（UTF-8 / 最大120文字）</label>
+    <textarea id="msg" maxlength="120" spellcheck="false">data.tron</textarea>
+  </div>
+
+  <div class="grid">
+    <div class="ctrl space"><div class="row"><span class="name">F0 · BIT0</span><span class="val"><span id="f0v">2400</span><span class="u"> Hz</span></span></div><input id="f0" type="range" min="300" max="6000" step="50" value="2400"></div>
+    <div class="ctrl mark"><div class="row"><span class="name">F1 · BIT1</span><span class="val"><span id="f1v">500</span><span class="u"> Hz</span></span></div><input id="f1" type="range" min="300" max="6000" step="50" value="500"></div>
+    <div class="ctrl"><div class="row"><span class="name">BAUD</span><span class="val"><span id="bdv">20</span><span class="u"> bps</span></span></div><input id="bd" type="range" min="10" max="300" step="5" value="20"></div>
+  </div>
+  <div class="grid grid-2">
+    <div class="ctrl"><div class="row"><span class="name">EDGE</span><span class="val"><span id="edv">1.0</span><span class="u"> ms</span></span></div><input id="ed" type="range" min="0" max="5" step="0.1" value="1.0"></div>
+    <div class="ctrl"><div class="row"><span class="name">VOLUME</span><span class="val"><span id="vlv">40</span><span class="u"> %</span></span></div><input id="vl" type="range" min="0" max="100" step="1" value="40"></div>
+  </div>
+
+  <div class="chan">
+    <h2>チャネルシミュレータ（送信音・WAVに適用 / 復号テスト用）</h2>
+    <div class="line"><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="noiseOn"> 白色雑音</label>
+      SNR <input id="snr" type="range" min="-22" max="20" step="1" value="-12"> <span id="snrv">-12</span> dB</div>
+    <div class="line"><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="dropOn"> バースト欠落</label>
+      回数 <input id="drop" type="range" min="0" max="8" step="1" value="2"> <span id="dropv">2</span>（各3シンボル）</div>
+  </div>
+
+  <div class="actions">
+    <button class="primary" id="tx">▶ 送信 TRANSMIT</button>
+    <button id="wav">⤓ WAV保存</button>
+    <button id="stop">■ 停止</button>
+  </div>
+
+  <div class="readout">
+    <div class="meta">
+      <span>MODE <b id="mMode">FEC</b></span>
+      <span>PAYLOAD <b id="mPay">0</b> B</span>
+      <span>符号化率 <b id="mRate">4/7</b></span>
+      <span>送信ビット <b id="mBits">0</b></span>
+      <span>所要時間 <b id="mDur">0.00</b> s</span>
+    </div>
+    <div class="hex" id="hex"></div>
+  </div>
+
+  <footer>
+    <div><span class="k">FEC:</span> 畳み込み符号 rate=1/2, K=7（NASA標準 G1=133, G2=171）+ インターリーブ D=16。Hamming(7,4)より大幅に高い誤り訂正能力。</div>
+    <div><span class="k">2-FSK:</span> 純サイン波の2トーンで 0/1 を伝送。EDGE はシンボル端のフェード長（小さいほどクリック感のある硬いエッジ）。</div>
+    <div><span class="k">注:</span> 復号には同じ F0 / F1 / BAUD を設定したv5デコーダーが必要です。</div>
+  </footer>
+</div>
+
+<script>
+/* ============ v5 コーデック: 畳み込み符号 rate=1/2, K=7 + インターリーブD=16 ============ */
+const PREAMBLE_BYTE=0xAA,PREAMBLE_COUNT=4,SYNC_V5=0xD891;
+// 畳み込み符号 NASA標準 G1=0b1011011, G2=0b1111001
+const _K=7,_G1=0b1011011,_G2=0b1111001;
+function _par(x){let p=0;while(x){p^=x&1;x>>=1;}return p;}
+function crc16(b){let c=0xFFFF;for(const x of b){c^=(x<<8)&0xFFFF;for(let i=0;i<8;i++)c=(c&0x8000)?((c<<1)^0x1021)&0xFFFF:(c<<1)&0xFFFF;}return c&0xFFFF;}
+function byteToBits(b){const o=[];for(let i=7;i>=0;i--)o.push((b>>i)&1);return o;}
+function wordBits(w){const o=[];for(let i=15;i>=0;i--)o.push((w>>i)&1);return o;}
+function preambleBits(){const o=[];for(let i=0;i<PREAMBLE_COUNT;i++)o.push(...byteToBits(PREAMBLE_BYTE));return o;}
+
+// 畳み込みエンコード
+function convEncode(bits){let reg=0;const out=[];for(const b of bits){reg=((b<<(_K-1))|reg)>>1;out.push(_par(reg&_G1),_par(reg&_G2));}return out;}
+
+// インターリーブ D=16
+const IL_D=16;
+function ilInterleave(bits){const N=bits.length,rows=Math.ceil(N/IL_D),p=[...bits,...new Array(rows*IL_D-N).fill(0)],o=[];for(let c=0;c<IL_D;c++)for(let r=0;r<rows;r++)o.push(p[r*IL_D+c]);return o.slice(0,N);}
+
+function buildV5(pl){
+  const LEN=pl.length,crc=crc16([LEN,...pl]),info=[LEN,...pl,(crc>>8)&0xFF,crc&0xFF];
+  const infoBits=[];for(const b of info)infoBits.push(...byteToBits(b));
+  const coded=convEncode(infoBits);
+  const interleaved=ilInterleave(coded);
+  return [...preambleBits(),...wordBits(SYNC_V5),...interleaved];
+}
+
+/* ============ モデム・チャネル（v4: 2-FSK 純サイン） ============ */
+function modulate(bits,sr,f0,f1,baud,amp,edgeMs){const spb=Math.round(sr/baud),data=new Float32Array(bits.length*spb);let ph=0,idx=0;
+  const fadeN=Math.min((sr*edgeMs/1000)|0,(spb/2)|0); // シンボル端フェード（小さいほど硬いエッジ）
+  for(const bit of bits){const f=bit?f1:f0,d=2*Math.PI*f/sr;
+    for(let i=0;i<spb;i++){let v=Math.sin(ph)*amp;ph+=d;if(ph>2*Math.PI)ph-=2*Math.PI;
+      if(fadeN>0){if(i<fadeN)v*=i/fadeN;else if(i>=spb-fadeN)v*=(spb-1-i)/fadeN;}
+      data[idx++]=v;}}
+  return data;}
+let _g2=null;function randn(){if(_g2!==null){const v=_g2;_g2=null;return v;}let u=0,v=0,s=0;do{u=Math.random()*2-1;v=Math.random()*2-1;s=u*u+v*v;}while(s===0||s>=1);const m=Math.sqrt(-2*Math.log(s)/s);_g2=v*m;return u*m;}
+function applyChannel(data,sr,baud,amp){
+  let out=data;
+  if($('noiseOn').checked){const snr=+$('snr').value,Ps=amp*amp/2,sigma=Math.sqrt(Ps/Math.pow(10,snr/10));out=Float32Array.from(out,x=>x+randn()*sigma);}
+  if($('dropOn').checked){const spb=Math.round(sr/baud),nb=+$('drop').value,bs=3;out=out.slice();
+    for(let b=0;b<nb;b++){const sSym=(Math.random()*Math.max(1,out.length/spb-bs))|0;for(let s=0;s<bs;s++){const o=(sSym+s)*spb;for(let i=0;i<spb&&o+i<out.length;i++)out[o+i]=0;}}}
+  return out;
+}
+
+/* ============ 状態・UI ============ */
+const $=id=>document.getElementById(id);
+let audioCtx=null,analyser=null,source=null,playing=false,playStart=0,playDur=0;
+function ctx(){if(!audioCtx){audioCtx=new (window.AudioContext||window.webkitAudioContext)();analyser=audioCtx.createAnalyser();analyser.fftSize=4096;analyser.smoothingTimeConstant=0.55;analyser.connect(audioCtx.destination);}return audioCtx;}
+function readP(){return{text:$('msg').value,f0:+$('f0').value,f1:+$('f1').value,baud:+$('bd').value,amp:(+$('vl').value)/100,edge:+$('ed').value};}
+
+function buildBits(p){const pl=Array.from(new TextEncoder().encode(p.text)).slice(0,120);const bits=buildV5(pl);return {pl,bits};}
+
+function preview(){
+  const p=readP();const {pl,bits}=buildBits(p);
+  $('mMode').textContent='V5·CC';
+  $('mPay').textContent=pl.length;
+  $('mRate').textContent='1/2';
+  $('mBits').textContent=bits.length;
+  $('mDur').textContent=(bits.length/p.baud).toFixed(2);
+  const crc=crc16([pl.length,...pl]);
+  let html=`<span class="len">LEN ${pl.length.toString(16).padStart(2,'0').toUpperCase()}</span> · payload <span class="pay">`+
+    pl.map(b=>b.toString(16).padStart(2,'0').toUpperCase()).join(' ')+`</span> · <span class="crc">CRC16 ${crc.toString(16).padStart(4,'0').toUpperCase()}</span>`;
+  $('hex').innerHTML=html;
+}
+
+function transmit(){
+  const p=readP();const {bits}=buildBits(p);const c=ctx();if(c.state==='suspended')c.resume();
+  if(source){try{source.stop();}catch(e){}source=null;}
+  let data=modulate(bits,c.sampleRate,p.f0,p.f1,p.baud,p.amp,p.edge);
+  data=applyChannel(data,c.sampleRate,p.baud,p.amp);
+  const ab=c.createBuffer(1,data.length,c.sampleRate);ab.copyToChannel(data,0);
+  source=c.createBufferSource();source.buffer=ab;source.connect(analyser);source.onended=()=>{playing=false;};
+  playStart=c.currentTime;playDur=data.length/c.sampleRate;playing=true;source.start();
+}
+function stopAudio(){if(source){try{source.stop();}catch(e){}source.disconnect();source=null;}playing=false;}
+
+function encodeWAV(data,sr){const n=data.length,buf=new ArrayBuffer(44+n*2),v=new DataView(buf);const ws=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i));};
+  ws(0,'RIFF');v.setUint32(4,36+n*2,true);ws(8,'WAVE');ws(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,sr,true);v.setUint32(28,sr*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);ws(36,'data');v.setUint32(40,n*2,true);
+  let o=44;for(let i=0;i<n;i++){let s=Math.max(-1,Math.min(1,data[i]));v.setInt16(o,s<0?s*0x8000:s*0x7FFF,true);o+=2;}return new Blob([buf],{type:'audio/wav'});}
+function downloadWAV(){const p=readP();const {bits}=buildBits(p);const c=ctx();let data=modulate(bits,c.sampleRate,p.f0,p.f1,p.baud,p.amp,p.edge);data=applyChannel(data,c.sampleRate,p.baud,p.amp);
+  const ch=($('noiseOn').checked?('_snr'+$('snr').value):'')+($('dropOn').checked?('_drop'+$('drop').value):'');
+  const url=URL.createObjectURL(encodeWAV(data,c.sampleRate));const a=document.createElement('a');a.href=url;a.download=`fsk_v4_${p.fec?'fec':'raw'}_${p.f0}-${p.f1}_${p.baud}bd${ch}.wav`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+
+/* ============ p5 スコープ（2音・モノクロ） ============ */
+const sketch=s=>{let W=700,H=200,fd=null;let F_LO=500,F_HI=4000;
+  s.setup=()=>{const h=$('scopeHolder');W=h.clientWidth||700;const c=s.createCanvas(W,H);c.parent(h);s.pixelDensity(Math.min(window.devicePixelRatio||1,2));};
+  s.windowResized=()=>{const h=$('scopeHolder');W=h.clientWidth||700;s.resizeCanvas(W,H);};
+  const xF=hz=>s.map(hz,F_LO,F_HI,40,W-14);
+  s.draw=()=>{const p=readP();const lo=Math.min(p.f0,p.f1),hi=Math.max(p.f0,p.f1);
+    F_LO=Math.max(0,lo-600);F_HI=hi+600;
+    s.background(0);grid();
+    if(playing&&analyser){if(!fd)fd=new Uint8Array(analyser.frequencyBinCount);analyser.getByteFrequencyData(fd);spec(fd);}else idle();
+    mk(p.f0,255,'0');mk(p.f1,136,'1');};
+  function grid(){s.stroke(255,255,255,18);s.strokeWeight(1);
+    const lo=Math.ceil(F_LO/500)*500;for(let k=lo;k<=F_HI;k+=500){const x=xF(k);s.line(x,16,x,H-16);}
+    s.noStroke();s.fill(110);s.textFont('monospace');s.textSize(8);s.textAlign(s.CENTER,s.TOP);
+    for(let k=lo;k<=F_HI;k+=1000)s.text(k,xF(k),H-14);}
+  function spec(fd){const n=analyser.frequencyBinCount,nyq=audioCtx.sampleRate/2;s.noFill();s.stroke(255,255,255,230);s.strokeWeight(1);s.beginShape();let st=false;for(let i=0;i<n;i++){const hz=i/n*nyq;if(hz<F_LO||hz>F_HI)continue;const x=xF(hz),y=s.map(fd[i],0,255,H-18,16);if(!st){s.vertex(x,H-18);st=true;}s.vertex(x,y);}if(st)s.vertex(W-14,H-18);s.endShape();}
+  function idle(){s.noStroke();s.fill(90);s.textFont('monospace');s.textSize(10);s.textAlign(s.CENTER,s.CENTER);s.text('IDLE',W/2,H/2);}
+  function mk(hz,g,l){const x=xF(hz);s.stroke(g,g,g,200);s.strokeWeight(1);s.drawingContext.setLineDash([2,3]);s.line(x,16,x,H-18);s.drawingContext.setLineDash([]);s.noStroke();s.fill(g);s.textFont('monospace');s.textSize(9);s.textAlign(s.CENTER,s.BOTTOM);s.text(l,x,15);}
+};
+
+window.addEventListener('DOMContentLoaded',()=>{
+  const sync=()=>{$('f0v').textContent=$('f0').value;$('f1v').textContent=$('f1').value;$('bdv').textContent=$('bd').value;$('edv').textContent=(+$('ed').value).toFixed(1);$('vlv').textContent=$('vl').value;$('snrv').textContent=$('snr').value;$('dropv').textContent=$('drop').value;preview();};
+  ['msg','f0','f1','bd','ed','vl','noiseOn','snr','dropOn','drop'].forEach(id=>$(id).addEventListener('input',sync));
+  $('tx').addEventListener('click',transmit);$('wav').addEventListener('click',downloadWAV);$('stop').addEventListener('click',stopAudio);
+  new p5(sketch);sync();
+});
+</script>
+</body>
+</html>

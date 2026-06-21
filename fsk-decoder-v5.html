@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FSK DECODER v5 — 畳み込み符号 データ音響受信</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+<style>
+  :root{--bg:#000;--panel:#0a0a0a;--panel2:#111;--line:rgba(255,255,255,.14);
+    --f0:#ffffff;--f1:#888;--ink:#f4f4f4;--dim:#777;--dim2:#444;--ok:#fff;--warn:#ff3b30;--mid:#aaa;--accent:#fff;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--sans:ui-monospace,Menlo,Consolas,monospace;}
+  *{box-sizing:border-box}html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--mono);-webkit-font-smoothing:antialiased;line-height:1.5;padding:22px 16px 70px}
+  .wrap{max-width:760px;margin:0 auto}
+  header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:18px;border-bottom:1px solid var(--line);padding-bottom:14px}
+  .logo{font-family:var(--mono);font-weight:400;letter-spacing:.28em;font-size:12px;color:var(--ink);border:1px solid var(--line);padding:5px 10px}
+  .logo b{color:var(--ink);font-weight:700}.logo .v{color:var(--dim2);font-size:10px;margin-left:6px}
+  h1{font-size:13px;font-weight:400;margin:0;letter-spacing:.08em}.sub{font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:.14em}
+  .scope{position:relative;border:1px solid var(--line);background:#000;overflow:hidden;margin-bottom:14px}
+  #scopeHolder canvas{display:block;width:100%!important;height:auto!important}
+  .scopeTag{position:absolute;top:10px;left:12px;z-index:2;font-family:var(--mono);font-size:9px;letter-spacing:.22em;color:var(--dim)}
+  .pill{position:absolute;top:9px;right:11px;z-index:2;font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--dim);border:1px solid var(--line);padding:3px 10px;background:#000}
+  .pill.live{color:var(--ink);border-color:var(--ink)}.pill.sig{color:#000;background:var(--ink);border-color:var(--ink)}
+  .diag{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;margin-bottom:14px;background:var(--line);border:1px solid var(--line)}
+  .d{background:var(--bg);padding:10px 11px}
+  .d .n{font-family:var(--mono);font-size:8.5px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase}
+  .d .v{font-family:var(--mono);font-size:16px;color:var(--ink);margin-top:4px}.d .v .u{font-size:10px;color:var(--dim2)}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-bottom:8px;background:var(--line);border:1px solid var(--line)}
+  .ctrl{background:var(--bg);padding:11px 12px}
+  .ctrl .row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+  .ctrl .name{font-family:var(--mono);font-size:9px;letter-spacing:.16em;color:var(--dim)}.ctrl .val{font-family:var(--mono);font-size:13px;color:var(--ink)}.ctrl .val .u{color:var(--dim2);font-size:10px}
+  input[type=range]{width:100%;-webkit-appearance:none;appearance:none;height:1px;background:var(--line);margin:6px 0 0}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;background:var(--ink);border:none;cursor:pointer;border-radius:0}
+  input[type=range]::-moz-range-thumb{width:11px;height:11px;background:var(--ink);border:none;cursor:pointer;border-radius:0}
+  .hint{font-family:var(--mono);font-size:10px;color:var(--dim2);margin:2px 2px 14px;letter-spacing:.04em}
+  .opts{display:flex;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--dim);margin:0 2px 14px;align-items:center;letter-spacing:.06em}
+  .opts label{display:flex;align-items:center;gap:7px;cursor:pointer}.opts input[type=checkbox]{accent-color:var(--ink);width:14px;height:14px}
+  .sources{display:grid;gap:1px;grid-template-columns:1fr;margin-bottom:14px;background:var(--line);border:1px solid var(--line)}
+  @media(min-width:560px){.sources{grid-template-columns:1fr 1fr}}
+  .src{background:var(--bg);padding:14px}
+  .src h2{font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--dim);margin:0 0 11px;text-transform:uppercase}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  button{font-family:var(--mono);font-size:12px;letter-spacing:.12em;padding:12px 18px;cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--ink);transition:.1s}
+  button:hover{background:var(--panel2);border-color:var(--dim)}button.primary{background:var(--ink);color:#000;border-color:var(--ink);font-weight:700}button.primary.on{background:var(--warn);border-color:var(--warn);color:#fff}
+  .sens{display:flex;align-items:center;gap:9px;margin-top:13px;font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--dim)}.sens input{flex:1}
+  .drop{border:1px dashed var(--line);padding:18px 12px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--dim);cursor:pointer;transition:.1s;letter-spacing:.04em}
+  .drop:hover,.drop.over{border-color:var(--ink);color:var(--ink);background:var(--panel)}.drop b{color:var(--ink);font-weight:700}
+  .status{font-family:var(--mono);font-size:10px;color:var(--dim);min-height:16px;margin:0 2px 14px;letter-spacing:.04em}.status.err{color:var(--warn)}
+  .log{background:var(--panel);border:1px solid var(--line)}
+  .log.rxlog{margin-top:14px;opacity:.7}
+  .log.rxlog:hover{opacity:1;transition:opacity .2s}
+  .logHead{display:flex;justify-content:space-between;align-items:center;padding:9px 11px;border-bottom:1px solid var(--line)}
+  .logHead .t{font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--dim)}.logHead button{padding:5px 11px;font-size:10px;background:var(--bg)}
+  .empty{font-family:var(--mono);font-size:10px;color:var(--dim2);padding:16px 11px;letter-spacing:.04em}
+  .frame{border-top:1px solid var(--line);padding:12px 11px}.frame:first-child{border-top:none}
+  .frame .top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:7px}
+  .badge{font-family:var(--mono);font-size:9px;padding:2px 7px;border:1px solid var(--line);color:var(--dim);letter-spacing:.06em}
+  .badge.ok{background:var(--ink);color:#000;border-color:var(--ink)}
+  .badge.ng{color:var(--warn);border-color:var(--warn)}
+  .badge.miss{color:var(--mid);border-color:var(--mid)}
+  .badge.fec{color:var(--ink);border-color:var(--ink)}
+  .frame .time{font-family:var(--mono);font-size:9px;color:var(--dim2);margin-left:auto}
+  .frame .msg{font-size:16px;color:var(--ink);word-break:break-word;font-family:var(--mono);letter-spacing:.02em}
+  .frame .det{font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:7px;word-break:break-all;letter-spacing:.02em}
+  footer{font-family:var(--mono);font-size:9px;color:var(--dim2);margin-top:22px;line-height:1.8;letter-spacing:.04em}footer .k{color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">FSK·<b>RX</b><span class="v">v5</span></div>
+    <div><h1>2-TONE SINE FSK DECODER v5</h1>
+      <div class="sub">Conv(K=7,rate1/2)+Viterbi · soft-decision · AGC · phase+drift</div></div>
+  </header>
+
+  <div class="scope"><div class="scopeTag" id="scopeTag">RX SPECTRUM</div><div class="pill" id="pill">IDLE</div><div id="scopeHolder"></div></div>
+
+  <div class="diag">
+    <div class="d"><div class="n">信頼度</div><div class="v"><span id="dConf">—</span><span class="u"> %</span></div></div>
+    <div class="d"><div class="n">トーンSNR</div><div class="v"><span id="dSnr">—</span><span class="u"> dB</span></div></div>
+    <div class="d"><div class="n">FEC訂正</div><div class="v"><span id="dCorr">—</span><span class="u"> bit</span></div></div>
+    <div class="d"><div class="n">実効レート</div><div class="v"><span id="dRate">—</span><span class="u"> bd</span></div></div>
+  </div>
+
+  <div class="grid">
+    <div class="ctrl space"><div class="row"><span class="name">F0 · BIT0</span><span class="val"><span id="f0v">2400</span><span class="u"> Hz</span></span></div><input id="f0" type="range" min="300" max="6000" step="50" value="2400"></div>
+    <div class="ctrl mark"><div class="row"><span class="name">F1 · BIT1</span><span class="val"><span id="f1v">500</span><span class="u"> Hz</span></span></div><input id="f1" type="range" min="300" max="6000" step="50" value="500"></div>
+    <div class="ctrl"><div class="row"><span class="name">BAUD</span><span class="val"><span id="bdv">20</span><span class="u"> bps</span></span></div><input id="bd" type="range" min="10" max="300" step="5" value="20"></div>
+  </div>
+  <div class="hint">↑ v5エンコーダーと F0 / F1 / BAUD を一致させてください。</div>
+
+  <div class="log"><div class="logHead"><span class="t">DECODED FRAMES</span><button id="clear">クリア</button></div>
+    <div id="frames"><div class="empty">まだ復号されたフレームはありません。</div></div></div>
+  <div class="opts">
+    <label><input type="checkbox" id="optAgc" checked> AGC正規化</label>
+    <label><input type="checkbox" id="optDrift" checked> ドリフト探索</label>
+    <label><input type="checkbox" id="optEye" checked> アイダイアグラム</label>
+  </div>
+
+  <div class="sources">
+    <div class="src"><h2>① マイクで受信</h2><div class="actions"><button class="primary" id="mic">● 受信開始</button></div>
+      <div class="sens">感度 <input id="sens" type="range" min="2" max="40" step="1" value="8"> <span id="sensv">8</span>×</div></div>
+    <div class="src"><h2>② WAVファイルを解析</h2>
+      <div class="drop" id="drop"><b>WAVをドロップ</b> またはタップして選択<br><span style="font-size:10px">v4エンコーダーのWAV出力(FEC/RAW)に対応</span></div>
+      <input id="file" type="file" accept="audio/*,.wav" hidden></div>
+  </div>
+
+  <div class="status" id="status">待機中 — 受信開始するか、WAVを読み込んでください。</div>
+
+  <div class="log rxlog"><div class="logHead"><span class="t">RX LOG</span><button id="clearlog">クリア</button></div>
+    <div id="rxframes"><div class="empty">受信ログはありません。</div></div></div>
+
+  <footer>
+    <div><span class="k">FEC:</span> 畳み込み符号 rate=1/2, K=7（NASA標準）+ インターリーブ D=16 + Viterbiソフト判定復号。Hamming(7,4)より大幅に高い誤り訂正能力。</div>
+    <div><span class="k">バースト検知:</span> F0/F1特化Goertzel + 高速EMA + スライドデコード（2秒ごと）。スマホAGCが落ち着いた後の信号も取りこぼさない。</div>
+    <div><span class="k">注:</span> v5エンコーダーと F0 / F1 / BAUD を一致させてください。スマホOSのAGC/エコーキャンセラ対策として、音量を大きめに設定するか WAV解析をご利用ください。</div>
+  </footer>
+</div>
+
+<script>
+/* ============ v5 コーデック: Viterbi復号 + デインターリーブ ============ */
+const SYNC_V5=0xD891;
+const _K=7,_G1=0b1011011,_G2=0b1111001,_STATES=1<<(_K-1);
+function _par(x){let p=0;while(x){p^=x&1;x>>=1;}return p;}
+function crc16(b){let c=0xFFFF;for(const x of b){c^=(x<<8)&0xFFFF;for(let i=0;i<8;i++)c=(c&0x8000)?((c<<1)^0x1021)&0xFFFF:(c<<1)&0xFFFF;}return c&0xFFFF;}
+function decodeText(payload){try{return new TextDecoder('utf-8',{fatal:false}).decode(new Uint8Array(payload));}catch(e){return '(decode error)';}}
+function bitsToBytes(bits){const o=[];for(let i=0;i+8<=bits.length;i+=8){let b=0;for(let j=0;j<8;j++)b=(b<<1)|(bits[i+j]&1);o.push(b);}return o;}
+
+// 遷移テーブルを事前計算（起動時1回）
+const _trans=(()=>{const t=Array.from({length:_STATES},(_,s)=>[0,1].map(b=>{const reg=((b<<(_K-1))|s)>>1;return{ns:reg&(_STATES-1),o:[_par(reg&_G1),_par(reg&_G2)]};return null;}));return t;})();
+
+// Viterbi復号（ソフト判定入力 -1〜+1）
+function viterbiDecode(soft){
+  const n=soft.length>>1;const INF=1e9;
+  const pm=new Float32Array(_STATES).fill(INF);pm[0]=0;
+  const tb=[];
+  for(let t=0;t<n;t++){
+    const r0=soft[t*2],r1=soft[t*2+1];
+    const npm=new Float32Array(_STATES).fill(INF);
+    const hist=new Int8Array(_STATES).fill(-1);
+    for(let s=0;s<_STATES;s++){
+      if(pm[s]===INF)continue;
+      for(const b of [0,1]){
+        const{ns,o}=_trans[s][b];
+        const d0=r0-(o[0]?1:-1),d1=r1-(o[1]?1:-1);
+        const cost=pm[s]+d0*d0+d1*d1;
+        if(cost<npm[ns]){npm[ns]=cost;hist[ns]=s|(b<<6);}
+      }
+    }
+    pm.set(npm);tb.push(hist);
+  }
+  let s=0,minP=INF;
+  for(let i=0;i<_STATES;i++)if(pm[i]<minP){minP=pm[i];s=i;}
+  const bits=new Array(n);
+  for(let t=n-1;t>=0;t--){const h=tb[t][s];bits[t]=(h>>6)&1;s=h&63;}
+  return bits;
+}
+
+// デインターリーブ D=16
+const IL_D=16;
+function ilDeinterleave(soft){
+  const N=soft.length,rows=Math.ceil(N/IL_D);
+  const o=new Float32Array(rows*IL_D);
+  let idx=0;
+  for(let c=0;c<IL_D;c++)for(let r=0;r<rows;r++)o[r*IL_D+c]=soft[idx++]??0;
+  return Array.from(o.slice(0,N));
+}
+
+// SYNCをソフト判定列から探してViterbi復号
+function parseV5(soft){
+  const hard=soft.map(v=>v>0?1:0),n=hard.length;
+  for(let i=0;i+16<=n;i++){
+    let mm=0;for(let k=0;k<16;k++)if(hard[i+k]!==((SYNC_V5>>(15-k))&1))mm++;
+    if(mm>2)continue;
+    const body=soft.slice(i+16);
+    const deil=ilDeinterleave(body);
+    const dec=viterbiDecode(deil);
+    if(dec.length<8)continue;
+    const bytes=bitsToBytes(dec);
+    if(bytes.length<3)continue;
+    const LEN=bytes[0];
+    if(LEN>120||bytes.length<LEN+3)continue;
+    const payload=bytes.slice(1,LEN+1),crcRx=(bytes[LEN+1]<<8)|bytes[LEN+2];
+    if(crc16([LEN,...payload])!==crcRx)continue;
+    return{mode:'V5',text:decodeText(payload),payload,len:LEN,corrected:0,startBit:i,endBit:i+16+deil.length};
+  }
+  return null;
+}
+function parseAll(soft){
+  const fr=parseV5(soft);
+  if(fr)return{frames:[fr],misses:0};
+  return{frames:[],misses:0};
+}
+
+/* ============ DSP: Goertzelソフト判定 + AGC + 位相/ドリフト探索 ============ */
+function hann(N){const w=new Float32Array(N);for(let i=0;i<N;i++)w[i]=0.5-0.5*Math.cos(2*Math.PI*i/(N-1));return w;}
+function percentile(a,p){if(!a.length)return 0;const b=Float32Array.from(a).sort();return b[Math.min(b.length-1,Math.max(0,Math.floor(p*(b.length-1))))];}
+function pairPow(samp,start,win,ca,cb){const N=win.length;let a1=0,a2=0,b1=0,b2=0;for(let i=0;i<N;i++){const x=win[i]*samp[start+i];const a0=x+ca*a1-a2;a2=a1;a1=a0;const b0=x+cb*b1-b2;b2=b1;b1=b0;}const p0=a1*a1+a2*a2-ca*a1*a2,p1=b1*b1+b2*b2-cb*b1*b2;return[p0>0?p0:0,p1>0?p1:0];}
+
+// demodPassをソフト判定（確信度）を返すように変更
+function demodPassSoft(samp,sr,f0,f1,phase,spbF,win,g0,g1){
+  const ca=2*Math.cos(2*Math.PI*f0/sr),cb=2*Math.cos(2*Math.PI*f1/sr),N=win.length;
+  const soft=[],conf=[],pw=[];let k=0;
+  for(;;){
+    const start=Math.round(phase+k*spbF);if(start+N>samp.length)break;
+    const[p0,p1]=pairPow(samp,start,win,ca,cb);
+    const n0=p0/g0,n1=p1/g1,tot=n0+n1+1e-12;
+    // -1(F0確実)〜+1(F1確実) のソフト判定値
+    soft.push((n1-n0)/tot);
+    conf.push(Math.abs(n1-n0)/tot);
+    pw.push(n1>=n0?[p1,p0]:[p0,p1]);k++;
+  }
+  return{soft,conf,pw};
+}
+function estimateGains(samp,sr,f0,f1,win){const ca=2*Math.cos(2*Math.PI*f0/sr),cb=2*Math.cos(2*Math.PI*f1/sr),N=win.length,a=[],b=[];for(let start=0;start+N<=samp.length;start+=N){const[p0,p1]=pairPow(samp,start,win,ca,cb);a.push(p0);b.push(p1);}return[Math.max(1e-9,percentile(a,0.8)),Math.max(1e-9,percentile(b,0.8))];}
+function frameStats(fr,conf,pw){let cs=0,win=0,los=0,c=0;for(let k=fr.startBit;k<fr.endBit&&k<conf.length;k++){cs+=conf[k]||0;if(pw[k]){win+=pw[k][0];los+=pw[k][1];}c++;}fr.conf=c?cs/c:0;fr.snr=(los>0)?10*Math.log10((win/c)/(los/c+1e-12)):99;}
+
+function decode(samp,sr,f0,f1,baud,opts){
+  opts=opts||{};const spb=Math.round(sr/baud);if(spb<4||samp.length<spb*10)return{frames:[],spb};
+  const win=hann(spb),pstep=Math.max(1,Math.floor(spb/16));
+  const drifts=(opts.drift!==false&&!opts.quick)?[1-0.003,1,1+0.003]:[1];
+  const agcModes=(opts.agc!==false)?[false,true]:[false];
+  let G=[1,1];if(agcModes.includes(true))G=estimateGains(samp,sr,f0,f1,win);
+  let best={score:-1,frames:[],misses:0,phase:0,spbF:spb,soft:null,conf:null,pw:null};
+  for(const agc of agcModes){const g0=agc?G[0]:1,g1=agc?G[1]:1;
+    for(const sc of drifts){const spbF=spb*sc;
+      for(let ph=0;ph<spb;ph+=pstep){
+        const r=demodPassSoft(samp,sr,f0,f1,ph,spbF,win,g0,g1);
+        const{frames,misses}=parseAll(r.soft);
+        let conf=0;if(frames.length){for(const fr of frames){let s=0,c=0;for(let k=fr.startBit;k<fr.endBit&&k<r.conf.length;k++){s+=r.conf[k]||0;c++;}conf+=c?s/c:0;}conf/=frames.length;}
+        const score=frames.length*1e6+conf*1000+misses;
+        if(score>best.score)best={score,frames,misses,phase:ph,spbF,soft:r.soft,conf:r.conf,pw:r.pw};
+      }
+    }
+  }
+  best.frames.forEach(fr=>frameStats(fr,best.conf||[],best.pw||[]));
+  return{frames:best.frames,misses:best.misses,spb,phase:best.phase,spbF:best.spbF,
+    r:{soft:best.soft,conf:best.conf||[],pw:best.pw||[]},win,sr,f0,f1,baud,corrected:0};
+}
+
+function buildEye(res,samp,maxSym=48,OSF=20){
+  if(!res||!res.r||!res.frames.length)return null;
+  const{sr,f0,f1,win}=res,spb=win.length;
+  const fr=res.frames[0],k0=fr.startBit,k1=Math.min(fr.endBit,k0+maxSym),traces=[];
+  const ca=2*Math.cos(2*Math.PI*f0/sr),cb=2*Math.cos(2*Math.PI*f1/sr);
+  for(let k=k0;k<k1;k++){const base=res.phase+k*res.spbF,tr=[];
+    for(let j=0;j<=OSF;j++){const o=(j/OSF-0.5)*spb,start=Math.round(base+o);
+      if(start<0||start+spb>samp.length){tr.push(null);continue;}
+      const[p0,p1]=pairPow(samp,start,win,ca,cb);tr.push((p1-p0)/(p1+p0+1e-12));}
+    traces.push(tr);}
+  return{traces,OSF};
+}
+
+/* ============ 状態・UI（v2踏襲） ============ */
+const $=id=>document.getElementById(id);const P={f0:2400,f1:500,baud:20};
+let audioCtx=null,analyser=null,micStream=null,micNode=null,listening=false;
+function readParams(){P.f0=+$('f0').value;P.f1=+$('f1').value;P.baud=+$('bd').value;$('f0v').textContent=P.f0;$('f1v').textContent=P.f1;$('bdv').textContent=P.baud;}
+function curOpts(){return{agc:$('optAgc').checked,drift:$('optDrift').checked};}
+let lastDiag=null,eyeData=null,eyeUntil=0;const recent=new Float32Array(8192);
+function pushRecent(c){const N=recent.length,L=c.length;if(L>=N)recent.set(c.subarray(L-N));else{recent.copyWithin(0,L);recent.set(c,N-L);}}
+
+const workletSrc=`class Cap extends AudioWorkletProcessor{constructor(){super();this.b=[];this.N=1024;}process(inp){const ch=inp[0][0];if(ch){for(let i=0;i<ch.length;i++)this.b.push(ch[i]);if(this.b.length>=this.N){const o=new Float32Array(this.b);this.b=[];this.port.postMessage(o,[o.buffer]);}}return true;}}registerProcessor('cap',Cap);`;
+
+/* ---- 改善版バースト検知 + スライドデコード ---- */
+// ① F0/F1特化 Goertzel: 全帯域エネルギーではなく、FSKの2音だけを監視
+//    → 部屋の話し声・エアコン等の環境音で誤検知しない
+// ② 高速EMA (α=0.85 ≒ 0.15秒収束): 受信開始直後でも素早く適応
+//    → 旧0.97(≒1.8秒収束)より大幅改善
+// ③ eps固定下限を廃止: EMA相対比のみで判定（静かな部屋で逆効果になる問題を解消）
+// ④ スライドデコード: バースト中2秒ごとにdecodeを試行
+//    → スマホAGCが落ち着いた後の信号も取りこぼさない
+// ⑤ silence閾値をBAUD連動: 1シンボル長×3チャンク分（固定85msより適切）
+
+let toneEMA=0,inBurst=false,silenceChunks=0,capture=null,preroll=[],prerollLen=0;
+let slideTimer=null;
+const RING_SEC=14; // リングバッファ長(秒) — 最長フレームを余裕でカバー
+let ringBuf=null,ringPos=0,ringFull=false;
+
+const seen=new Map();
+function sig(fr){return fr.text+'|'+fr.len+'|'+fr.mode;}
+function isNew(fr){const now=performance.now(),s=sig(fr),t=seen.get(s);if(t&&now-t<3000)return false;seen.set(s,now);return true;}
+function flatten(cs){let n=0;for(const c of cs)n+=c.length;const o=new Float32Array(n);let p=0;for(const c of cs){o.set(c,p);p+=c.length;}return o;}
+function ringSnapshot(){
+  if(!ringBuf)return new Float32Array(0);
+  if(!ringFull){const s=new Float32Array(ringPos);s.set(ringBuf.subarray(0,ringPos));return s;}
+  const s=new Float32Array(ringBuf.length);s.set(ringBuf.subarray(ringPos));s.set(ringBuf.subarray(0,ringPos),ringBuf.length-ringPos);return s;}
+function pushRing(chunk){
+  if(!ringBuf)return;
+  const L=chunk.length,N=ringBuf.length;
+  if(L>=N){ringBuf.set(chunk.subarray(L-N));ringPos=0;ringFull=true;return;}
+  const space=N-ringPos;
+  if(L<=space){ringBuf.set(chunk,ringPos);ringPos+=L;if(ringPos>=N){ringPos=0;ringFull=true;}}
+  else{ringBuf.set(chunk.subarray(0,space),ringPos);ringPos=0;ringFull=true;ringBuf.set(chunk.subarray(space),0);ringPos=L-space;}}
+
+function tryDecode(flat,label){
+  const sr=audioCtx.sampleRate;
+  const res=decode(flat,sr,P.f0,P.f1,P.baud,curOpts());
+  applyDiag(res);
+  let added=0;
+  res.frames.forEach(fr=>{if(isNew(fr)){addFrame(fr,label);added++;}});
+  if($('optEye').checked&&res.frames.length){eyeData=buildEye(res,flat);eyeUntil=performance.now()+8000;}
+  return{added,res};}
+
+function onSamples(chunk){
+  pushRecent(chunk);
+  pushRing(chunk);
+  const sr=audioCtx.sampleRate;
+  const ca=2*Math.cos(2*Math.PI*P.f0/sr),cb=2*Math.cos(2*Math.PI*P.f1/sr);
+
+  // ① F0/F1特化Goertzel（2音のパワーだけを見る）
+  let a1=0,a2=0,b1=0,b2=0;
+  for(let i=0;i<chunk.length;i++){const x=chunk[i];const a0=x+ca*a1-a2;a2=a1;a1=a0;const b0=x+cb*b1-b2;b2=b1;b1=b0;}
+  const toneE=((a1*a1+a2*a2-ca*a1*a2)+(b1*b1+b2*b2-cb*b1*b2))/chunk.length;
+
+  const K=+$('sens').value;
+  // ⑤ silence閾値: 1シンボル長をカバーする最小チャンク数
+  const spb=Math.round(sr/P.baud);
+  const silThr=Math.max(3,Math.ceil(spb/chunk.length)*2);
+
+  if(!inBurst){
+    // ② 高速EMA（信号なし時のみ更新）
+    toneEMA=0.85*toneEMA+0.15*toneE;
+    // ③ eps下限なし、EMA相対比のみ
+    preroll.push(chunk);prerollLen+=chunk.length;
+    const want=sr*0.4;
+    while(preroll.length>1&&prerollLen-preroll[0].length>=want)prerollLen-=preroll.shift().length;
+    if(toneEMA>0&&toneE>toneEMA*K){
+      inBurst=true;silenceChunks=0;
+      capture=preroll.slice();preroll=[];prerollLen=0;
+      setPill('sig','● SIGNAL');
+      // ④ スライドデコード: 2秒ごとに試行
+      slideTimer=setInterval(()=>{
+        if(!inBurst)return;
+        const flat=flatten(capture);
+        const{added}=tryDecode(flat,'live');
+        if(added)clearInterval(slideTimer);
+      },2000);
+    }
+  } else {
+    capture.push(chunk);
+    if(toneE>toneEMA*K*0.5)silenceChunks=0; // ヒステリシス: 検知閾値の半分で維持
+    else silenceChunks++;
+    let len=0;for(const c of capture)len+=c.length;
+    const maxSec=Math.max(RING_SEC-1,4);
+    if(silenceChunks>=silThr||len>sr*maxSec){
+      clearInterval(slideTimer);slideTimer=null;
+      inBurst=false;
+      const flat=flatten(capture);capture=null;
+      setPill('live','LISTENING');
+      const{added,res}=tryDecode(flat,'mic');
+      if(!added&&!res.frames.length&&len>sr*0.15)addMiss('mic',(flat.length/sr).toFixed(2),res.misses);
+    }
+  }
+}
+
+async function startMic(){
+  try{
+    audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==='suspended')await audioCtx.resume();
+    ringBuf=new Float32Array(Math.round(audioCtx.sampleRate*RING_SEC));
+    ringPos=0;ringFull=false;toneEMA=0;
+    micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+    const url=URL.createObjectURL(new Blob([workletSrc],{type:'application/javascript'}));
+    await audioCtx.audioWorklet.addModule(url);URL.revokeObjectURL(url);
+    const src=audioCtx.createMediaStreamSource(micStream);
+    analyser=audioCtx.createAnalyser();analyser.fftSize=4096;analyser.smoothingTimeConstant=0.5;
+    micNode=new AudioWorkletNode(audioCtx,'cap');
+    micNode.port.onmessage=ev=>onSamples(ev.data);
+    src.connect(analyser);src.connect(micNode);
+    listening=true;readParams();
+    $('mic').textContent='■ 受信停止';$('mic').classList.add('on');
+    setPill('live','LISTENING');
+    setStatus('受信中 — F0/F1特化バースト検知・スライドデコード有効。送信音を鳴らしてください。');
+  }catch(err){setStatus('マイクを起動できません: '+err.message+'　WAV解析をご利用ください（またはローカルで開く）。',true);}
+}
+function stopMic(){
+  clearInterval(slideTimer);slideTimer=null;
+  listening=false;inBurst=false;capture=null;preroll=[];prerollLen=0;
+  ringBuf=null;ringPos=0;ringFull=false;toneEMA=0;
+  if(micNode){micNode.port.onmessage=null;micNode.disconnect();micNode=null;}
+  if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null;}
+  $('mic').textContent='● 受信開始';$('mic').classList.remove('on');
+  setPill('','IDLE');setStatus('停止しました。');
+}
+
+async function decodeFile(file){try{setStatus('解析中: '+file.name+' …');audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();
+  const audio=await audioCtx.decodeAudioData(await file.arrayBuffer());readParams();const data=audio.getChannelData(0);
+  const res=decode(data,audio.sampleRate,P.f0,P.f1,P.baud,curOpts());applyDiag(res);
+  if(res.frames.length){res.frames.forEach(fr=>addFrame(fr,'wav'));if($('optEye').checked){eyeData=buildEye(res,data);eyeUntil=performance.now()+1e9;}
+    setStatus(`完了: ${res.frames.length}フレーム（${res.frames[0].mode} / ${file.name} / ${audio.sampleRate}Hz / 訂正${res.corrected}bit）`);}
+  else{addMiss('wav',(data.length/audio.sampleRate).toFixed(2),res.misses);setStatus('復号できませんでした。F0/F1/BAUDが一致しているか確認してください。',true);}
+}catch(err){setStatus('ファイルを読めません: '+err.message,true);}}
+
+/* ============ 表示 ============ */
+let hasFrame=false,hasLog=false;
+function clearEmpty(){if(!hasFrame){$('frames').innerHTML='';hasFrame=true;}}
+function clearEmptyLog(){if(!hasLog){$('rxframes').innerHTML='';hasLog=true;}}
+function nowStr(){const d=new Date();return d.toLocaleTimeString('ja-JP',{hour12:false})+'.'+String(d.getMilliseconds()).padStart(3,'0');}
+function applyDiag(res){if(!res||!res.frames.length)return;const f=res.frames[0];lastDiag={conf:f.conf,snr:f.snr};
+  $('dConf').textContent=(f.conf*100|0);$('dSnr').textContent=(f.snr>=99?'∞':f.snr.toFixed(1));$('dCorr').textContent=res.corrected;$('dRate').textContent=(res.baud*res.spb/res.spbF).toFixed(1);}
+function addFrame(fr,srcLabel){
+  // 上段: 成功フレームのみ
+  clearEmpty();
+  const hex=fr.payload.map(b=>b.toString(16).padStart(2,'0').toUpperCase()).join(' ');
+  const el=document.createElement('div');el.className='frame';
+  el.innerHTML=`<div class="top"><span class="badge ok">CRC ✓</span><span class="badge fec">${fr.mode}</span><span class="badge">${srcLabel.toUpperCase()}</span>`+
+    `<span class="badge">conf ${(fr.conf*100|0)}%</span><span class="badge">SNR ${fr.snr>=99?'∞':fr.snr.toFixed(1)}dB</span>`+
+    (fr.mode==='FEC'?`<span class="badge">訂正 ${fr.corrected}bit</span>`:'')+`<span class="time">${nowStr()}</span></div>`+
+    `<div class="msg"></div><div class="det">len ${fr.len} B · HEX ${hex}</div>`;
+  el.querySelector('.msg').textContent=fr.text||'(empty)';
+  $('frames').prepend(el);
+  // 下段ログにも記録
+  clearEmptyLog();
+  const lg=document.createElement('div');lg.className='frame';
+  lg.innerHTML=`<div class="top"><span class="badge ok">OK</span><span class="badge">${srcLabel.toUpperCase()}</span><span class="time">${nowStr()}</span></div>`+
+    `<div class="det">${(fr.text||'').substring(0,40)}${(fr.text||'').length>40?'…':''}</div>`;
+  $('rxframes').prepend(lg);
+}
+function addMiss(srcLabel,dur,misses){
+  // 下段ログのみ（上段には出さない）
+  clearEmptyLog();
+  const el=document.createElement('div');el.className='frame';
+  const tag=misses>0?'miss':'ng',txt=misses>0?`SYNC ${misses}回 / CRC不一致`:'フレームなし';
+  el.innerHTML=`<div class="top"><span class="badge ${tag}">${misses>0?'NEAR-MISS':'NO FRAME'}</span><span class="badge">${srcLabel.toUpperCase()}</span><span class="time">${nowStr()}</span></div><div class="det">${dur}s · ${txt}</div>`;
+  $('rxframes').prepend(el);
+}
+function setStatus(t,err){const s=$('status');s.textContent=t;s.classList.toggle('err',!!err);}
+function setPill(cls,t){const p=$('pill');p.className='pill'+(cls?' '+cls:'');p.textContent=t;}
+
+/* ============ p5 スコープ（モノクロ・可聴域追従） ============ */
+const sketch=s=>{let W=700,H=230,fd=null;let F_LO=200,F_HI=3200;const SP_T=20,SP_B=186;
+  s.setup=()=>{const h=$('scopeHolder');W=h.clientWidth||700;const c=s.createCanvas(W,H);c.parent(h);s.pixelDensity(Math.min(window.devicePixelRatio||1,2));};
+  s.windowResized=()=>{const h=$('scopeHolder');W=h.clientWidth||700;s.resizeCanvas(W,H);};
+  const xF=hz=>s.map(hz,F_LO,F_HI,40,W-14);
+  s.draw=()=>{const showEye=eyeData&&performance.now()<eyeUntil;$('scopeTag').textContent=showEye?'EYE DIAGRAM':'RX SPECTRUM';
+    const lo=Math.min(P.f0,P.f1),hi=Math.max(P.f0,P.f1);F_LO=Math.max(0,lo-700);F_HI=hi+700;
+    s.background(0);
+    if(showEye){eye();return;}grid();if(listening&&analyser){if(!fd)fd=new Uint8Array(analyser.frequencyBinCount);analyser.getByteFrequencyData(fd);spec(fd);}else idle();
+    mk(P.f0,255,'0');mk(P.f1,136,'1');meters();};
+  function grid(){s.stroke(255,255,255,16);s.strokeWeight(1);const lo=Math.ceil(F_LO/500)*500;for(let k=lo;k<=F_HI;k+=500){const x=xF(k);s.line(x,SP_T,x,SP_B);}s.noStroke();s.fill(110);s.textFont('monospace');s.textSize(8);s.textAlign(s.CENTER,s.TOP);for(let k=lo;k<=F_HI;k+=1000)s.text(k,xF(k),SP_B+4);}
+  function spec(fd){const n=analyser.frequencyBinCount,nyq=audioCtx.sampleRate/2;s.noFill();s.stroke(255,255,255,230);s.strokeWeight(1);s.beginShape();let st=false;for(let i=0;i<n;i++){const hz=i/n*nyq;if(hz<F_LO||hz>F_HI)continue;const x=xF(hz),y=s.map(fd[i],0,255,SP_B,SP_T);if(!st){s.vertex(x,SP_B);st=true;}s.vertex(x,y);}if(st)s.vertex(W-14,SP_B);s.endShape();}
+  function idle(){s.noStroke();s.fill(90);s.textFont('monospace');s.textSize(10);s.textAlign(s.CENTER,s.CENTER);s.text(listening?'LISTENING':'IDLE',W/2,(SP_T+SP_B)/2);}
+  function mk(hz,g,l){const x=xF(hz);s.stroke(g,g,g,200);s.strokeWeight(1);s.drawingContext.setLineDash([2,3]);s.line(x,SP_T,x,SP_B);s.drawingContext.setLineDash([]);s.noStroke();s.fill(g);s.textFont('monospace');s.textSize(9);s.textAlign(s.CENTER,s.BOTTOM);s.text(l,x,SP_T-1);}
+  function meters(){const sr=audioCtx?audioCtx.sampleRate:48000,spb=Math.max(8,Math.round(sr/P.baud)),N=Math.min(spb,recent.length),ca=2*Math.cos(2*Math.PI*P.f0/sr),cb=2*Math.cos(2*Math.PI*P.f1/sr);
+    let a1=0,a2=0,b1=0,b2=0;const off=recent.length-N;for(let i=0;i<N;i++){const x=recent[off+i];const a0=x+ca*a1-a2;a2=a1;a1=a0;const b0=x+cb*b1-b2;b2=b1;b1=b0;}
+    const p0=Math.max(0,a1*a1+a2*a2-ca*a1*a2),p1=Math.max(0,b1*b1+b2*b2-cb*b1*b2),tot=p0+p1+1e-12,y=H-26,h=7,x0=40,w=W-14-40;
+    s.noStroke();s.fill(255,255,255,12);s.rect(x0,y,w,h);const en=Math.min(1,Math.sqrt(tot/N)*6),a=listening?(50+en*180):28,r0=p0/tot,r1=p1/tot;
+    s.fill(255,255,255,a);s.rect(x0,y,w*r0,h);s.fill(136,136,136,a);s.rect(x0+w*r0,y,w*r1,h);s.fill(110);s.textFont('monospace');s.textSize(8);s.textAlign(s.LEFT,s.BOTTOM);s.text('TONE',x0,y-2);s.textAlign(s.RIGHT,s.BOTTOM);s.text(r1>r0?'→1':'→0',W-14,y-2);}
+  function eye(){const x0=44,x1=W-14,yMid=H/2,amp=(H-60)/2;s.stroke(255,255,255,24);s.strokeWeight(1);s.line(x0,yMid,x1,yMid);s.drawingContext.setLineDash([2,3]);s.line((x0+x1)/2,24,(x0+x1)/2,H-24);s.drawingContext.setLineDash([]);
+    s.noStroke();s.fill(110);s.textFont('monospace');s.textSize(8);s.textAlign(s.LEFT,s.TOP);s.text('+1',x0,18);s.textAlign(s.LEFT,s.BOTTOM);s.text('-1',x0,H-12);
+    const tr=eyeData.traces,OSF=eyeData.OSF;for(const t of tr){let drawing=false;for(let j=0;j<t.length;j++){const v=t[j];if(v==null){if(drawing){s.endShape();drawing=false;}continue;}const x=s.map(j,0,OSF,x0,x1),y=yMid-v*amp,g=v>=0?255:136;if(!drawing){s.noFill();s.stroke(g,g,g,90);s.strokeWeight(1);s.beginShape();drawing=true;}s.vertex(x,y);}if(drawing)s.endShape();}
+    if(lastDiag){s.noStroke();s.fill(244);s.textSize(10);s.textAlign(s.RIGHT,s.TOP);s.text(`conf ${(lastDiag.conf*100|0)}%  ·  SNR ${lastDiag.snr>=99?'∞':lastDiag.snr.toFixed(1)}dB`,x1,18);}}
+};
+
+window.addEventListener('DOMContentLoaded',()=>{readParams();['f0','f1','bd'].forEach(id=>$(id).addEventListener('input',readParams));
+  $('sens').addEventListener('input',()=>$('sensv').textContent=$('sens').value);$('mic').addEventListener('click',()=>listening?stopMic():startMic());
+  $('clear').addEventListener('click',()=>{$('frames').innerHTML='<div class="empty">まだ復号されたフレームはありません。</div>';hasFrame=false;eyeData=null;});
+  $('clearlog').addEventListener('click',()=>{$('rxframes').innerHTML='<div class="empty">受信ログはありません。</div>';hasLog=false;});
+  const drop=$('drop'),file=$('file');drop.addEventListener('click',()=>file.click());file.addEventListener('change',e=>{if(e.target.files[0])decodeFile(e.target.files[0]);});
+  ['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
+  drop.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)decodeFile(f);});new p5(sketch);});
+</script>
+</body>
+</html>
