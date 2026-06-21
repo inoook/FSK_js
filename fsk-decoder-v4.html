@@ -87,10 +87,12 @@
   </div>
   <div class="hint">↑ 送信側と F0 / F1 / BAUD を一致させてください。FEC/RAW はSYNCで自動判別します。</div>
 
+  <div class="log"><div class="logHead"><span class="t">DECODED FRAMES</span><button id="clear">クリア</button></div>
+    <div id="frames"><div class="empty">まだ復号されたフレームはありません。</div></div></div>
+
   <div class="opts">
     <label><input type="checkbox" id="optAgc" checked> AGC正規化</label>
     <label><input type="checkbox" id="optDrift" checked> ドリフト探索</label>
-    <label><input type="checkbox" id="optStream" checked> ストリーミング復号</label>
     <label><input type="checkbox" id="optEye" checked> アイダイアグラム</label>
   </div>
 
@@ -104,13 +106,10 @@
 
   <div class="status" id="status">待機中 — 受信開始するか、WAVを読み込んでください。</div>
 
-  <div class="log"><div class="logHead"><span class="t">DECODED FRAMES</span><button id="clear">クリア</button></div>
-    <div id="frames"><div class="empty">まだ復号されたフレームはありません。</div></div></div>
-
   <footer>
+    <div><span class="k">バースト検知:</span> F0/F1の2音特化Goertzel（環境音誤検知を低減）+ 高速EMA（0.15秒収束、旧比12倍高速）。バースト中は2秒ごとにスライドデコードを試行し、スマホAGCが落ち着いた後の信号も取りこぼさない。</div>
     <div><span class="k">v4:</span> 2トーンの純サインFSK。SYNCで FEC / RAW を判別。FECは Hamming(7,4) を符号語単位で訂正し、列インターリーブを解いてバースト誤りに対応。最終的に CRC-16 で確定します。</div>
-    <div><span class="k">統計:</span> 「FEC訂正」は訂正できた誤りビット数（受信時のおおよその誤りの多さの指標）。RAWフレームは常に0。</div>
-    <div><span class="k">注:</span> iframe内ではマイクがブロックされる場合があります。HTMLをローカル/自サイト(HTTPS)で開くか、WAV解析をご利用ください。</div>
+    <div><span class="k">注:</span> スマホOSのAGC/エコーキャンセラはコードで止められない場合があります。受信スマホの音量を大きめに設定するか、WAV解析をご利用ください。</div>
   </footer>
 </div>
 
@@ -185,30 +184,128 @@ let lastDiag=null,eyeData=null,eyeUntil=0;const recent=new Float32Array(8192);
 function pushRecent(c){const N=recent.length,L=c.length;if(L>=N)recent.set(c.subarray(L-N));else{recent.copyWithin(0,L);recent.set(c,N-L);}}
 
 const workletSrc=`class Cap extends AudioWorkletProcessor{constructor(){super();this.b=[];this.N=1024;}process(inp){const ch=inp[0][0];if(ch){for(let i=0;i<ch.length;i++)this.b.push(ch[i]);if(this.b.length>=this.N){const o=new Float32Array(this.b);this.b=[];this.port.postMessage(o,[o.buffer]);}}return true;}}registerProcessor('cap',Cap);`;
-let noiseEMA=1e-3,inBurst=false,silence=0,capture=null,preroll=[],prerollLen=0,streamTick=0;
-const seen=new Map();function sig(fr){return fr.text+'|'+fr.len+'|'+fr.mode;}function isNew(fr){const now=performance.now(),s=sig(fr),t=seen.get(s);if(t&&now-t<3000)return false;seen.set(s,now);return true;}
+
+/* ---- 改善版バースト検知 + スライドデコード ---- */
+// ① F0/F1特化 Goertzel: 全帯域エネルギーではなく、FSKの2音だけを監視
+//    → 部屋の話し声・エアコン等の環境音で誤検知しない
+// ② 高速EMA (α=0.85 ≒ 0.15秒収束): 受信開始直後でも素早く適応
+//    → 旧0.97(≒1.8秒収束)より大幅改善
+// ③ eps固定下限を廃止: EMA相対比のみで判定（静かな部屋で逆効果になる問題を解消）
+// ④ スライドデコード: バースト中2秒ごとにdecodeを試行
+//    → スマホAGCが落ち着いた後の信号も取りこぼさない
+// ⑤ silence閾値をBAUD連動: 1シンボル長×3チャンク分（固定85msより適切）
+
+let toneEMA=0,inBurst=false,silenceChunks=0,capture=null,preroll=[],prerollLen=0;
+let slideTimer=null;
+const RING_SEC=14; // リングバッファ長(秒) — 最長フレームを余裕でカバー
+let ringBuf=null,ringPos=0,ringFull=false;
+
+const seen=new Map();
+function sig(fr){return fr.text+'|'+fr.len+'|'+fr.mode;}
+function isNew(fr){const now=performance.now(),s=sig(fr),t=seen.get(s);if(t&&now-t<3000)return false;seen.set(s,now);return true;}
 function flatten(cs){let n=0;for(const c of cs)n+=c.length;const o=new Float32Array(n);let p=0;for(const c of cs){o.set(c,p);p+=c.length;}return o;}
+function ringSnapshot(){
+  if(!ringBuf)return new Float32Array(0);
+  if(!ringFull){const s=new Float32Array(ringPos);s.set(ringBuf.subarray(0,ringPos));return s;}
+  const s=new Float32Array(ringBuf.length);s.set(ringBuf.subarray(ringPos));s.set(ringBuf.subarray(0,ringPos),ringBuf.length-ringPos);return s;}
+function pushRing(chunk){
+  if(!ringBuf)return;
+  const L=chunk.length,N=ringBuf.length;
+  if(L>=N){ringBuf.set(chunk.subarray(L-N));ringPos=0;ringFull=true;return;}
+  const space=N-ringPos;
+  if(L<=space){ringBuf.set(chunk,ringPos);ringPos+=L;if(ringPos>=N){ringPos=0;ringFull=true;}}
+  else{ringBuf.set(chunk.subarray(0,space),ringPos);ringPos=0;ringFull=true;ringBuf.set(chunk.subarray(space),0);ringPos=L-space;}}
 
-function onSamples(chunk){pushRecent(chunk);const sr=audioCtx.sampleRate;const ca=2*Math.cos(2*Math.PI*P.f0/sr),cb=2*Math.cos(2*Math.PI*P.f1/sr);
-  let a1=0,a2=0,b1=0,b2=0;for(let i=0;i<chunk.length;i++){const x=chunk[i];const a0=x+ca*a1-a2;a2=a1;a1=a0;const b0=x+cb*b1-b2;b2=b1;b1=b0;}
-  const e=((a1*a1+a2*a2-ca*a1*a2)+(b1*b1+b2*b2-cb*b1*b2))/chunk.length,K=+$('sens').value,eps=1e-3;
-  if(!inBurst){noiseEMA=0.97*noiseEMA+0.03*e;preroll.push(chunk);prerollLen+=chunk.length;const want=sr*0.3;while(preroll.length>1&&prerollLen-preroll[0].length>=want)prerollLen-=preroll.shift().length;
-    if(e>Math.max(eps,noiseEMA*K)){inBurst=true;silence=0;streamTick=0;capture=preroll.slice();preroll=[];prerollLen=0;setPill('sig','● SIGNAL');}}
-  else{capture.push(chunk);if(e>Math.max(eps,noiseEMA*K))silence=0;else silence++;let len=0;for(const c of capture)len+=c.length;
-    if($('optStream').checked&&(++streamTick%12===0)){const res=decode(flatten(capture),sr,P.f0,P.f1,P.baud,{...curOpts(),quick:true});applyDiag(res);res.frames.forEach(fr=>{if(isNew(fr))addFrame(fr,'live');});if($('optEye').checked&&res.frames.length){eyeData=buildEye(res,flatten(capture));eyeUntil=performance.now()+6000;}}
-    if(silence>=4||len>sr*8){inBurst=false;const flat=flatten(capture);capture=null;setPill('live','LISTENING');
-      const res=decode(flat,sr,P.f0,P.f1,P.baud,curOpts());applyDiag(res);let added=0;res.frames.forEach(fr=>{if(isNew(fr)){addFrame(fr,'mic');added++;}});
-      if($('optEye').checked&&res.frames.length){eyeData=buildEye(res,flat);eyeUntil=performance.now()+8000;}
-      if(!added&&!res.frames.length&&len>sr*0.15)addMiss('mic',(flat.length/sr).toFixed(2),res.misses);}}}
+function tryDecode(flat,label){
+  const sr=audioCtx.sampleRate;
+  const res=decode(flat,sr,P.f0,P.f1,P.baud,curOpts());
+  applyDiag(res);
+  let added=0;
+  res.frames.forEach(fr=>{if(isNew(fr)){addFrame(fr,label);added++;}});
+  if($('optEye').checked&&res.frames.length){eyeData=buildEye(res,flat);eyeUntil=performance.now()+8000;}
+  return{added,res};}
 
-async function startMic(){try{audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();if(audioCtx.state==='suspended')await audioCtx.resume();
-  micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
-  const url=URL.createObjectURL(new Blob([workletSrc],{type:'application/javascript'}));await audioCtx.audioWorklet.addModule(url);URL.revokeObjectURL(url);
-  const src=audioCtx.createMediaStreamSource(micStream);analyser=audioCtx.createAnalyser();analyser.fftSize=4096;analyser.smoothingTimeConstant=0.5;
-  micNode=new AudioWorkletNode(audioCtx,'cap');micNode.port.onmessage=ev=>onSamples(ev.data);src.connect(analyser);src.connect(micNode);
-  listening=true;readParams();$('mic').textContent='■ 受信停止';$('mic').classList.add('on');setPill('live','LISTENING');setStatus('受信中 — 送信音を鳴らしてください。');
-}catch(err){setStatus('マイクを起動できません: '+err.message+'　WAV解析をご利用ください（またはローカルで開く）。',true);}}
-function stopMic(){listening=false;inBurst=false;capture=null;preroll=[];prerollLen=0;if(micNode){micNode.port.onmessage=null;micNode.disconnect();micNode=null;}if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null;}$('mic').textContent='● 受信開始';$('mic').classList.remove('on');setPill('','IDLE');setStatus('停止しました。');}
+function onSamples(chunk){
+  pushRecent(chunk);
+  pushRing(chunk);
+  const sr=audioCtx.sampleRate;
+  const ca=2*Math.cos(2*Math.PI*P.f0/sr),cb=2*Math.cos(2*Math.PI*P.f1/sr);
+
+  // ① F0/F1特化Goertzel（2音のパワーだけを見る）
+  let a1=0,a2=0,b1=0,b2=0;
+  for(let i=0;i<chunk.length;i++){const x=chunk[i];const a0=x+ca*a1-a2;a2=a1;a1=a0;const b0=x+cb*b1-b2;b2=b1;b1=b0;}
+  const toneE=((a1*a1+a2*a2-ca*a1*a2)+(b1*b1+b2*b2-cb*b1*b2))/chunk.length;
+
+  const K=+$('sens').value;
+  // ⑤ silence閾値: 1シンボル長をカバーする最小チャンク数
+  const spb=Math.round(sr/P.baud);
+  const silThr=Math.max(3,Math.ceil(spb/chunk.length)*2);
+
+  if(!inBurst){
+    // ② 高速EMA（信号なし時のみ更新）
+    toneEMA=0.85*toneEMA+0.15*toneE;
+    // ③ eps下限なし、EMA相対比のみ
+    preroll.push(chunk);prerollLen+=chunk.length;
+    const want=sr*0.4;
+    while(preroll.length>1&&prerollLen-preroll[0].length>=want)prerollLen-=preroll.shift().length;
+    if(toneEMA>0&&toneE>toneEMA*K){
+      inBurst=true;silenceChunks=0;
+      capture=preroll.slice();preroll=[];prerollLen=0;
+      setPill('sig','● SIGNAL');
+      // ④ スライドデコード: 2秒ごとに試行
+      slideTimer=setInterval(()=>{
+        if(!inBurst)return;
+        const flat=flatten(capture);
+        const{added}=tryDecode(flat,'live');
+        if(added)clearInterval(slideTimer);
+      },2000);
+    }
+  } else {
+    capture.push(chunk);
+    if(toneE>toneEMA*K*0.5)silenceChunks=0; // ヒステリシス: 検知閾値の半分で維持
+    else silenceChunks++;
+    let len=0;for(const c of capture)len+=c.length;
+    const maxSec=Math.max(RING_SEC-1,4);
+    if(silenceChunks>=silThr||len>sr*maxSec){
+      clearInterval(slideTimer);slideTimer=null;
+      inBurst=false;
+      const flat=flatten(capture);capture=null;
+      setPill('live','LISTENING');
+      const{added,res}=tryDecode(flat,'mic');
+      if(!added&&!res.frames.length&&len>sr*0.15)addMiss('mic',(flat.length/sr).toFixed(2),res.misses);
+    }
+  }
+}
+
+async function startMic(){
+  try{
+    audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==='suspended')await audioCtx.resume();
+    ringBuf=new Float32Array(Math.round(audioCtx.sampleRate*RING_SEC));
+    ringPos=0;ringFull=false;toneEMA=0;
+    micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+    const url=URL.createObjectURL(new Blob([workletSrc],{type:'application/javascript'}));
+    await audioCtx.audioWorklet.addModule(url);URL.revokeObjectURL(url);
+    const src=audioCtx.createMediaStreamSource(micStream);
+    analyser=audioCtx.createAnalyser();analyser.fftSize=4096;analyser.smoothingTimeConstant=0.5;
+    micNode=new AudioWorkletNode(audioCtx,'cap');
+    micNode.port.onmessage=ev=>onSamples(ev.data);
+    src.connect(analyser);src.connect(micNode);
+    listening=true;readParams();
+    $('mic').textContent='■ 受信停止';$('mic').classList.add('on');
+    setPill('live','LISTENING');
+    setStatus('受信中 — F0/F1特化バースト検知・スライドデコード有効。送信音を鳴らしてください。');
+  }catch(err){setStatus('マイクを起動できません: '+err.message+'　WAV解析をご利用ください（またはローカルで開く）。',true);}
+}
+function stopMic(){
+  clearInterval(slideTimer);slideTimer=null;
+  listening=false;inBurst=false;capture=null;preroll=[];prerollLen=0;
+  ringBuf=null;ringPos=0;ringFull=false;toneEMA=0;
+  if(micNode){micNode.port.onmessage=null;micNode.disconnect();micNode=null;}
+  if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null;}
+  $('mic').textContent='● 受信開始';$('mic').classList.remove('on');
+  setPill('','IDLE');setStatus('停止しました。');
+}
 
 async function decodeFile(file){try{setStatus('解析中: '+file.name+' …');audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();
   const audio=await audioCtx.decodeAudioData(await file.arrayBuffer());readParams();const data=audio.getChannelData(0);

@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>FSK ENCODER v4 — 8音メロディFSK データ音響送信</title>
+<title>FSK ENCODER v4 — 2-TONE SINE FSK データ音響送信</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
 <style>
   :root{--bg:#000;--panel:#0a0a0a;--panel2:#111;--line:rgba(255,255,255,.14);
-    --f0:#ffffff;--f1:#888;--ink:#f4f4f4;--dim:#777;--dim2:#444;--ok:#fff;--warn:#ff3b30;--accent:#fff;
+    --f0:#ffffff;--f1:#888;--ink:#f4f4f4;--dim:#777;--dim2:#444;--ok:#fff;--warn:#ff3b30;--mid:#aaa;--accent:#fff;
     --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--sans:ui-monospace,Menlo,Consolas,monospace;}
   *{box-sizing:border-box}html,body{margin:0}
   body{background:var(--bg);color:var(--ink);font-family:var(--mono);-webkit-font-smoothing:antialiased;line-height:1.5;padding:22px 16px 70px}
@@ -16,7 +16,7 @@
   .logo{font-family:var(--mono);font-weight:400;letter-spacing:.28em;font-size:12px;color:var(--ink);border:1px solid var(--line);padding:5px 10px}
   .logo b{color:var(--ink);font-weight:700} .logo .v{color:var(--dim2);font-size:10px;margin-left:6px}
   h1{font-size:13px;font-weight:400;margin:0;letter-spacing:.08em}.sub{font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:.14em}
-  .scope{position:relative;border:1px solid var(--line);background:#000;overflow:hidden;margin-bottom:16px}
+  .scope{position:relative;border:1px solid var(--line);background:#000;overflow:hidden;margin-bottom:14px}
   #scopeHolder canvas{display:block;width:100%!important;height:auto!important}
   .scopeTag{position:absolute;top:10px;left:12px;z-index:2;font-family:var(--mono);font-size:9px;letter-spacing:.22em;color:var(--dim)}
   .legend{position:absolute;top:10px;right:12px;z-index:2;font-family:var(--mono);font-size:9px;letter-spacing:.1em;display:flex;gap:14px;color:var(--dim)}
@@ -25,16 +25,15 @@
   label.cap{display:block;font-family:var(--mono);font-size:9px;letter-spacing:.22em;color:var(--dim);text-transform:uppercase;margin-bottom:7px}
   textarea{width:100%;min-height:54px;resize:vertical;background:var(--panel);color:var(--ink);border:1px solid var(--line);font-family:var(--mono);font-size:15px;padding:11px 12px;letter-spacing:.02em}
   textarea:focus{outline:none;border-color:var(--ink)}
-  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line);border:1px solid var(--line)}
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line);border:1px solid var(--line);margin-bottom:8px}
   @media(min-width:560px){.grid{grid-template-columns:repeat(4,1fr)}}
   .ctrl{background:var(--bg);padding:11px 12px}
   .ctrl .row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
   .ctrl .name{font-family:var(--mono);font-size:9px;letter-spacing:.16em;color:var(--dim)}.ctrl .val{font-family:var(--mono);font-size:13px;color:var(--ink)}.ctrl .val .u{color:var(--dim2);font-size:10px}
   input[type=range]{width:100%;-webkit-appearance:none;appearance:none;height:1px;background:var(--line);margin:6px 0 0}
-  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;background:var(--ink);border:none;cursor:pointer}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;background:var(--ink);border:none;cursor:pointer;border-radius:0}
   input[type=range]::-moz-range-thumb{width:11px;height:11px;background:var(--ink);border:none;cursor:pointer;border-radius:0}
-  input[type=range]::-webkit-slider-thumb{border-radius:0}
-  .opts{display:flex;gap:18px;flex-wrap:wrap;font-family:var(--mono);font-size:11px;color:var(--dim);margin:14px 2px;align-items:center;letter-spacing:.06em}
+  .opts{display:flex;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--dim);margin:0 2px 14px;align-items:center;letter-spacing:.06em}
   .opts label{display:flex;align-items:center;gap:7px;cursor:pointer}.opts input[type=checkbox]{accent-color:var(--ink);width:14px;height:14px}
   .chan{background:var(--panel);border:1px solid var(--line);padding:13px 14px;margin-bottom:14px}
   .chan h2{font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--dim);margin:0 0 11px;text-transform:uppercase}
@@ -72,12 +71,12 @@
   </div>
 
   <div class="grid">
-    <div class="ctrl space"><div class="row"><span class="name">F0 · BIT0</span><span class="val"><span id="f0v">2000</span><span class="u"> Hz</span></span></div><input id="f0" type="range" min="500" max="6000" step="50" value="2000"></div>
-    <div class="ctrl mark"><div class="row"><span class="name">F1 · BIT1</span><span class="val"><span id="f1v">3000</span><span class="u"> Hz</span></span></div><input id="f1" type="range" min="500" max="6000" step="50" value="3000"></div>
-    <div class="ctrl"><div class="row"><span class="name">BAUD</span><span class="val"><span id="bdv">100</span><span class="u"> bps</span></span></div><input id="bd" type="range" min="20" max="300" step="5" value="100"></div>
+    <div class="ctrl space"><div class="row"><span class="name">F0 · BIT0</span><span class="val"><span id="f0v">2400</span><span class="u"> Hz</span></span></div><input id="f0" type="range" min="300" max="6000" step="50" value="2400"></div>
+    <div class="ctrl mark"><div class="row"><span class="name">F1 · BIT1</span><span class="val"><span id="f1v">500</span><span class="u"> Hz</span></span></div><input id="f1" type="range" min="300" max="6000" step="50" value="500"></div>
+    <div class="ctrl"><div class="row"><span class="name">BAUD</span><span class="val"><span id="bdv">20</span><span class="u"> bps</span></span></div><input id="bd" type="range" min="10" max="300" step="5" value="20"></div>
     <div class="ctrl"><div class="row"><span class="name">EDGE</span><span class="val"><span id="edv">1.0</span><span class="u"> ms</span></span></div><input id="ed" type="range" min="0" max="5" step="0.1" value="1.0"></div>
   </div>
-  <div class="grid" style="margin-top:1px;border-top:none">
+  <div class="grid">
     <div class="ctrl"><div class="row"><span class="name">VOLUME</span><span class="val"><span id="vlv">40</span><span class="u"> %</span></span></div><input id="vl" type="range" min="0" max="100" step="1" value="40"></div>
   </div>
 
