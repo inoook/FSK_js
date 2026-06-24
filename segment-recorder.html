@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>セグメント録画</title>
+<title>押している間だけ録画</title>
 <style>
   :root{
     --bg:#0b0d10; --fg:#f4f5f7; --muted:#8b929c;
@@ -15,13 +15,11 @@
   #stage{position:fixed;inset:0;display:flex;flex-direction:column}
   .view{position:relative;flex:1;background:#000;overflow:hidden}
   video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
-  /* セグメント進捗（5本） */
-  .pips{position:absolute;top:max(14px,env(safe-area-inset-top));left:12px;right:12px;
-    display:flex;gap:6px;z-index:3}
-  .pip{flex:1;height:4px;border-radius:99px;background:rgba(255,255,255,.25);overflow:hidden}
-  .pip>i{display:block;height:100%;width:0;background:var(--fg);transition:width .1s linear}
-  .pip.done>i{width:100%}
-  .pip.active>i{background:var(--rec)}
+  /* 連続プログレス（0〜15秒） */
+  .track{position:absolute;top:max(14px,env(safe-area-inset-top));left:12px;right:12px;
+    height:4px;border-radius:99px;background:rgba(255,255,255,.25);overflow:hidden;z-index:3}
+  .track>i{display:block;height:100%;width:0;background:var(--fg)}
+  .recording .track>i{background:var(--rec)}
   .clock{position:absolute;top:max(28px,calc(env(safe-area-inset-top) + 14px));
     left:0;right:0;text-align:center;font-variant-numeric:tabular-nums;
     font-size:13px;letter-spacing:.04em;color:var(--muted);z-index:3;pointer-events:none}
@@ -29,19 +27,22 @@
     vertical-align:middle;margin-right:6px;animation:blink 1s steps(2,end) infinite}
   .recording .recdot{display:inline-block}
   @keyframes blink{50%{opacity:0}}
+  .hint{position:absolute;left:0;right:0;bottom:14px;text-align:center;font-size:12px;
+    color:var(--muted);z-index:3;pointer-events:none}
   /* コントロール */
   .bar{display:flex;align-items:center;justify-content:space-between;
     padding:18px 26px calc(20px + env(safe-area-inset-bottom));gap:16px;background:var(--bg)}
   .slot{width:64px;display:flex;justify-content:center}
   .txt{background:none;border:0;color:var(--fg);font-size:15px;padding:10px;cursor:pointer}
   .txt:disabled{color:var(--line)}
-  /* シャッター */
+  /* シャッター（押している間だけ録画） */
   #shutter{width:74px;height:74px;border-radius:50%;border:4px solid var(--fg);
-    background:transparent;padding:5px;cursor:pointer;display:grid;place-items:center}
+    background:transparent;padding:5px;display:grid;place-items:center;cursor:pointer;
+    touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
   #shutter>span{width:100%;height:100%;border-radius:50%;background:var(--rec);
-    transition:border-radius .18s,transform .18s}
+    transition:border-radius .15s,transform .15s}
   #shutter:disabled{opacity:.35}
-  #shutter.busy>span{border-radius:9px;transform:scale(.62)}
+  #shutter.holding>span{border-radius:30%;transform:scale(.7)}
   /* 結果オーバーレイ */
   #result{position:fixed;inset:0;background:var(--bg);z-index:9;display:none;
     flex-direction:column;padding:max(16px,env(safe-area-inset-top)) 16px
@@ -53,20 +54,22 @@
     font-size:16px;font-weight:600;border:0;cursor:pointer}
   .btn.dl{background:var(--ok);color:#04270f}
   .btn.again{background:var(--line);color:var(--fg)}
+  .note{padding-top:10px;font-size:12px;color:var(--muted);text-align:center;line-height:1.6}
   #msg{position:fixed;inset:0;display:none;place-items:center;padding:32px;
-    text-align:center;color:var(--muted);font-size:15px;line-height:1.7;z-index:20}
+    text-align:center;color:var(--muted);font-size:15px;line-height:1.7;z-index:20;white-space:pre-line}
 </style>
 </head>
 <body>
 <div id="stage">
   <div class="view" id="view">
     <video id="preview" autoplay muted playsinline></video>
-    <div class="pips" id="pips"></div>
+    <div class="track"><i id="bar"></i></div>
     <div class="clock"><span class="recdot"></span><span id="time">0.0 / 15.0s</span></div>
+    <div class="hint">ボタンを押している間だけ録画</div>
   </div>
   <div class="bar">
     <div class="slot"></div>
-    <button id="shutter" aria-label="3秒録画"><span></span></button>
+    <button id="shutter" aria-label="押している間だけ録画"><span></span></button>
     <div class="slot"><button id="finish" class="txt" disabled>完了</button></div>
   </div>
 </div>
@@ -75,30 +78,35 @@
   <video id="out" controls playsinline></video>
   <div class="rbar">
     <button id="retake" class="btn again">撮り直す</button>
-    <a id="save" class="btn dl" download="recording.webm">保存</a>
+    <button id="save" class="btn dl">保存</button>
   </div>
+  <div class="note" id="savehint"></div>
 </div>
 
 <div id="msg"></div>
 
 <script>
-const SEG_MS = 3000, MAX_SEG = 5;            // 3秒 × 5本 = 最大15秒
+const MAX_MS = 15000;                          // 合計15秒まで
 const $ = s => document.querySelector(s);
 const preview=$('#preview'), shutter=$('#shutter'), finishBtn=$('#finish'),
-      pipsEl=$('#pips'), timeEl=$('#time'), view=$('#view'),
-      resultEl=$('#result'), out=$('#out'), save=$('#save'), retake=$('#retake'), msg=$('#msg');
+      bar=$('#bar'), timeEl=$('#time'), view=$('#view'),
+      resultEl=$('#result'), out=$('#out'), saveBtn=$('#save'),
+      retake=$('#retake'), saveHint=$('#savehint'), msg=$('#msg');
 
-let stream, recorder, chunks=[], seg=0, busy=false, started=false, mime='';
-
-// 進捗ピップを5個生成
-for(let i=0;i<MAX_SEG;i++){const p=document.createElement('div');p.className='pip';p.innerHTML='<i></i>';pipsEl.appendChild(p);}
-const pips=[...pipsEl.children];
+let stream, recorder, chunks=[], mime='', lastBlob=null;
+let accMs=0, holding=false, started=false, holdStart=0, rafId=0;
 
 function fail(t){msg.textContent=t;msg.style.display='grid';}
 
 function pickMime(){
   const c=['video/mp4','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
   return c.find(m=>window.MediaRecorder&&MediaRecorder.isTypeSupported(m))||'';
+}
+
+function makeRecorder(){
+  recorder=new MediaRecorder(stream, mime?{mimeType:mime}:undefined);
+  recorder.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
+  recorder.onstop=finalize;
 }
 
 async function init(){
@@ -112,80 +120,94 @@ async function init(){
   }catch(e){return fail('カメラを開始できませんでした（権限とHTTPS接続を確認してください）。\n'+e.message);}
   preview.srcObject=stream;
   mime=pickMime();
-  recorder=new MediaRecorder(stream, mime?{mimeType:mime}:undefined);
-  recorder.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
-  recorder.onstop=finalize;
+  makeRecorder();
 }
 
-function updateTime(elapsed){
-  timeEl.textContent=(elapsed/1000).toFixed(1)+' / 15.0s';
+function render(cur){
+  bar.style.width=Math.min(cur/MAX_MS*100,100)+'%';
+  timeEl.textContent=(Math.min(cur,MAX_MS)/1000).toFixed(1)+' / 15.0s';
 }
 
-async function recordSegment(){
-  if(busy||seg>=MAX_SEG) return;
-  busy=true;
-  shutter.classList.add('busy'); view.classList.add('recording');
+function loop(){
+  if(!holding) return;
+  const cur=accMs+(performance.now()-holdStart);
+  render(cur);
+  if(cur>=MAX_MS){ accMs=MAX_MS; endHold(true); finishRecording(); return; }
+  rafId=requestAnimationFrame(loop);
+}
+
+function startHold(){
+  if(holding || accMs>=MAX_MS || resultEl.classList.contains('show')) return;
+  holding=true;
+  shutter.classList.add('holding'); view.classList.add('recording');
   finishBtn.disabled=true;
-  const pip=pips[seg]; pip.classList.add('active');
-  const bar=pip.querySelector('i');
-
-  // 1本目=start、2本目以降=resume → 一時停止分は記録されず1本につながる
+  // 1回目=start、2回目以降=resume → 一時停止分は記録されず1本につながる
   if(!started){ recorder.start(); started=true; } else { recorder.resume(); }
-
-  const t0=performance.now();
-  await new Promise(res=>{
-    const tick=()=>{
-      const dt=performance.now()-t0;
-      const ratio=Math.min(dt/SEG_MS,1);
-      bar.style.width=(ratio*100)+'%';
-      updateTime(seg*SEG_MS + dt*1);
-      if(dt>=SEG_MS) return res();
-      requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  });
-
-  recorder.pause();
-  pip.classList.remove('active'); pip.classList.add('done');
-  seg++;
-  updateTime(seg*SEG_MS);
-  busy=false;
-  shutter.classList.remove('busy'); view.classList.remove('recording');
-
-  if(seg>=MAX_SEG){ shutter.disabled=true; stopAll(); }
-  else { finishBtn.disabled=false; }
+  holdStart=performance.now();
+  rafId=requestAnimationFrame(loop);
 }
 
-function stopAll(){
-  finishBtn.disabled=true;
+function endHold(reachedMax){
+  if(!holding) return;
+  holding=false;
+  cancelAnimationFrame(rafId);
+  accMs += performance.now()-holdStart;
+  if(reachedMax) accMs=MAX_MS;
+  if(recorder.state==='recording') recorder.pause();
+  shutter.classList.remove('holding'); view.classList.remove('recording');
+  render(accMs);
+  if(accMs<MAX_MS) finishBtn.disabled=false;
+}
+
+function finishRecording(){
+  finishBtn.disabled=true; shutter.disabled=true;
   if(recorder && recorder.state!=='inactive') recorder.stop(); // → finalize()
 }
 
 function finalize(){
   if(!chunks.length) return;
   const type=chunks[0].type||mime||'video/webm';
-  const blob=new Blob(chunks,{type});
-  const url=URL.createObjectURL(blob);
-  out.src=url;
-  save.href=url;
-  save.download='recording.'+(type.includes('mp4')?'mp4':'webm');
+  lastBlob=new Blob(chunks,{type});
+  out.src=URL.createObjectURL(lastBlob);
+  const shareable = navigator.canShare && navigator.canShare({files:[new File([lastBlob],'v.'+ext(),{type})]});
+  saveHint.textContent = shareable
+    ? '「保存」→ 共有シートの「ビデオを保存」でカメラロールに入ります。'
+    : 'この端末では共有保存が使えないため、保存するとファイルとしてダウンロードされます。';
   resultEl.classList.add('show');
+}
+
+function ext(){ return (lastBlob&&lastBlob.type.includes('mp4'))?'mp4':'webm'; }
+
+async function save(){
+  if(!lastBlob) return;
+  const type=lastBlob.type;
+  const file=new File([lastBlob], 'recording-'+Date.now()+'.'+ext(), {type});
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    try{ await navigator.share({files:[file], title:'録画動画'}); return; }
+    catch(e){ if(e.name==='AbortError') return; }   // ユーザーがキャンセル
+  }
+  // フォールバック：ダウンロード
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(lastBlob); a.download=file.name;
+  document.body.appendChild(a); a.click(); a.remove();
 }
 
 function reset(){
   resultEl.classList.remove('show');
-  chunks=[]; seg=0; busy=false; started=false;
+  chunks=[]; lastBlob=null; accMs=0; holding=false; started=false;
   shutter.disabled=false; finishBtn.disabled=true;
-  pips.forEach(p=>{p.className='pip';p.querySelector('i').style.width='0';});
-  updateTime(0);
-  // 録画器を作り直して次セッションへ
-  recorder=new MediaRecorder(stream, mime?{mimeType:mime}:undefined);
-  recorder.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
-  recorder.onstop=finalize;
+  render(0);
+  makeRecorder();
 }
 
-shutter.addEventListener('click',recordSegment);
-finishBtn.addEventListener('click',stopAll);
+// 押している間だけ録画（Pointer Events で touch/mouse 共通化）
+shutter.addEventListener('pointerdown',e=>{ e.preventDefault(); startHold(); });
+window.addEventListener('pointerup',()=>{ if(holding) endHold(false); });
+window.addEventListener('pointercancel',()=>{ if(holding) endHold(false); });
+shutter.addEventListener('contextmenu',e=>e.preventDefault());
+
+finishBtn.addEventListener('click',finishRecording);
+saveBtn.addEventListener('click',save);
 retake.addEventListener('click',reset);
 init();
 </script>
