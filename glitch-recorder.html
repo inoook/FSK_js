@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>グリッチ録画（ストリート）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rock+Salt&display=swap" rel="stylesheet">
 <style>
   :root{ --bg:#07080a; --fg:#f4f5f7; --muted:#8b929c; --rec:#ff3b30; --ok:#34c759; --line:#2a2e35; }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -52,7 +55,7 @@
     <canvas id="preview"></canvas>
     <div class="track"><i id="bar"></i></div>
     <div class="clock"><span id="time">0.0 / 15.0s</span></div>
-    <div class="hint">押している間だけ録画／押すたびにストリート系トランジション</div>
+    <div class="hint">押している間だけ録画／押すたびにトランジション＋日付タグ</div>
   </div>
   <div class="bar">
     <div class="slot"></div>
@@ -83,8 +86,8 @@ const ctx=canvas.getContext('2d');
 
 let stream, recordStream, recorder, chunks=[], mime='', lastBlob=null;
 let accMs=0, holding=false, started=false, holdStart=0, rafMeter=0;
-let fx=null, sessionStart=Date.now();
-let prevCv, prevCtx, frzCv, frzCtx, scanPat;
+let fx=null, tag=null, tagUntil=0, sessionStart=Date.now();
+let sCv, sCtx, tCv, tCtx, scanPat;          // s=スナップショット, t=チャンネル合成用テンポラリ
 
 const r255=()=>Math.floor(Math.random()*256);
 const rnd=(a,b)=>a+Math.random()*(b-a);
@@ -104,6 +107,7 @@ function makeRecorder(){
 async function init(){
   if(!navigator.mediaDevices?.getUserMedia) return fail('このブラウザはカメラ取得に対応していません。');
   if(!window.MediaRecorder) return fail('このブラウザはMediaRecorderに非対応です。');
+  if(document.fonts&&document.fonts.load){ document.fonts.load("32px 'Rock Salt'").catch(()=>{}); } // 手書きフォント先読み
   try{
     stream=await navigator.mediaDevices.getUserMedia({
       video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}}, audio:true });
@@ -123,8 +127,8 @@ async function init(){
   };
 }
 function initBuffers(){
-  prevCv=document.createElement('canvas'); prevCv.width=canvas.width; prevCv.height=canvas.height; prevCtx=prevCv.getContext('2d');
-  frzCv=document.createElement('canvas'); frzCv.width=canvas.width; frzCv.height=canvas.height; frzCtx=frzCv.getContext('2d');
+  sCv=document.createElement('canvas'); sCv.width=canvas.width; sCv.height=canvas.height; sCtx=sCv.getContext('2d');
+  tCv=document.createElement('canvas'); tCv.width=canvas.width; tCv.height=canvas.height; tCtx=tCv.getContext('2d');
   const sc=document.createElement('canvas'); sc.width=1; sc.height=3;
   const sx=sc.getContext('2d'); sx.fillStyle='rgba(0,0,0,1)'; sx.fillRect(0,2,1,1);
   scanPat=ctx.createPattern(sc,'repeat');
@@ -133,106 +137,121 @@ function initBuffers(){
 /* ===== 描画ループ ===== */
 function draw(){
   const w=canvas.width,h=canvas.height;
-  prevCtx.clearRect(0,0,w,h); prevCtx.drawImage(canvas,0,0);   // 直前フレームを保持
   ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over';
-  ctx.drawImage(cam,0,0,w,h);                                  // 通常のカメラ映像
-  if(fx){
-    const p=(performance.now()-fx.start)/fx.dur;
-    if(p>=1){ fx=null; } else applyFx(fx,p,w,h);
-  }
-  drawHUD(w,h);                                                // 常時HUD（録画に焼き込む）
+  ctx.drawImage(cam,0,0,w,h);
+  if(fx){ const p=(performance.now()-fx.start)/fx.dur; if(p>=1){ fx=null; } else applyFx(fx,p,w,h); }
+  ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over';
+  drawHUD(w,h);
+  drawTag(w,h);
   requestAnimationFrame(draw);
 }
 
-/* ===== トランジション ===== */
-const FX=['vhs','datamosh','spray','strobe'];
+/* ===== トランジション（色収差・ブロックシャッフル・VHS・ストロボ） ===== */
+const FX=['chroma','shuffle','vhs','strobe'];
 function fireTransition(){
   const kind=FX[Math.floor(Math.random()*FX.length)];
-  const base={vhs:380,datamosh:520,spray:470,strobe:340}[kind];
+  const base={chroma:340,shuffle:360,vhs:380,strobe:340}[kind];
   fx={kind, start:performance.now(), dur:base*rnd(0.8,1.3)};
-  frzCtx.clearRect(0,0,canvas.width,canvas.height); frzCtx.drawImage(canvas,0,0); // 押した瞬間を凍結
-  if(kind==='spray'){ fx.dots=makeSprayDots(); fx.color=STREET[Math.floor(Math.random()*STREET.length)]; }
+  if(kind==='chroma') fx.angle=Math.random()<0.7 ? rnd(-0.25,0.25) : rnd(0,6.283);
+  if(kind==='shuffle'){ fx.cols=6+Math.floor(Math.random()*7); fx.rows=4+Math.floor(Math.random()*5); }
+  if(kind==='vhs') fx.band=rnd(0.06,0.14);
   if(kind==='strobe'){ fx.flashes=4+Math.floor(Math.random()*5); fx.seed=Math.floor(Math.random()*9); }
-  if(kind==='vhs'){ fx.band=rnd(0.06,0.14); }
 }
 function applyFx(fx,p,w,h){
-  if(fx.kind==='vhs') fxVHS(fx,p,w,h);
-  else if(fx.kind==='datamosh') fxMosh(fx,p,w,h);
-  else if(fx.kind==='spray') fxSpray(fx,p,w,h);
+  if(fx.kind==='chroma') fxChroma(fx,p,w,h);
+  else if(fx.kind==='shuffle') fxShuffle(fx,p,w,h);
+  else if(fx.kind==='vhs') fxVHS(fx,p,w,h);
   else fxStrobe(fx,p,w,h);
+}
+
+/* 色収差：RGBチャンネルを分離してずらす（収束して元に戻る） */
+function channel(src,color,dx,dy){
+  const w=canvas.width,h=canvas.height;
+  tCtx.globalCompositeOperation='source-over'; tCtx.clearRect(0,0,w,h); tCtx.drawImage(src,0,0);
+  tCtx.globalCompositeOperation='multiply'; tCtx.fillStyle=color; tCtx.fillRect(0,0,w,h);
+  ctx.globalCompositeOperation='lighter'; ctx.drawImage(tCv,dx,dy);
+}
+function fxChroma(fx,p,w,h){
+  const k=1-p, amt=w*0.02*(0.3+k);
+  sCtx.clearRect(0,0,w,h); sCtx.drawImage(canvas,0,0);          // 元フレームを退避
+  ctx.globalCompositeOperation='source-over'; ctx.fillStyle='#000'; ctx.fillRect(0,0,w,h);
+  const dx=Math.cos(fx.angle)*amt, dy=Math.sin(fx.angle)*amt;
+  channel(sCv,'#ff0000', dx, dy);
+  channel(sCv,'#00ff00', 0, 0);
+  channel(sCv,'#0000ff', -dx, -dy);
+  ctx.globalCompositeOperation='source-over';
+  if(Math.random()<0.4){ const sy=Math.random()*h, sh=h*0.02;
+    ctx.drawImage(canvas,0,sy,w,sh,(Math.random()*2-1)*w*0.04*k,sy,w,sh); }
+}
+
+/* ブロックシャッフル：グリッドの一部を入れ替える（時間経過で元に戻る） */
+function fxShuffle(fx,p,w,h){
+  const k=1-p, cols=fx.cols, rows=fx.rows, cw=w/cols, ch=h/rows;
+  sCtx.clearRect(0,0,w,h); sCtx.drawImage(canvas,0,0);          // ソース
+  for(let r=0;r<rows;r++) for(let c=0;c<cols;c++){
+    if(Math.random() < k*0.85){
+      const sc=Math.floor(Math.random()*cols), sr=Math.floor(Math.random()*rows);
+      ctx.drawImage(sCv, sc*cw, sr*ch, cw, ch, c*cw, r*ch, cw, ch);  // 別ブロックを持ってくる
+      if(Math.random()<0.2){ ctx.save(); ctx.globalCompositeOperation='difference';
+        ctx.fillStyle='rgb('+r255()+','+r255()+','+r255()+')'; ctx.fillRect(c*cw,r*ch,cw,ch); ctx.restore(); }
+    }
+  }
 }
 
 function fxVHS(fx,p,w,h){
   const k=1-p;
-  // 色ずれゴースト
   ctx.save(); ctx.globalCompositeOperation='screen'; ctx.globalAlpha=0.4;
   const gx=w*0.012*(0.6+k); ctx.drawImage(canvas,gx,0); ctx.drawImage(canvas,-gx,0); ctx.restore();
-  // 行のジッター
   const rows=6+Math.floor(Math.random()*8);
   for(let i=0;i<rows;i++){ const sy=Math.random()*h, sh=h*(0.01+Math.random()*0.03);
-    const ox=(Math.random()*2-1)*w*0.06*k; ctx.drawImage(canvas,0,sy,w,sh, ox,sy,w,sh); }
-  // トラッキングの明るい線
+    ctx.drawImage(canvas,0,sy,w,sh,(Math.random()*2-1)*w*0.06*k,sy,w,sh); }
   ctx.save(); ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=0.5*k; ctx.fillStyle='#fff';
-  for(let i=0;i<2;i++){ ctx.fillRect(0,Math.random()*h,w,1+Math.random()*2); } ctx.restore();
-  // ヘッドスイッチのノイズ帯（下部）
+  for(let i=0;i<2;i++) ctx.fillRect(0,Math.random()*h,w,1+Math.random()*2); ctx.restore();
   const bandH=h*fx.band, by=h-bandH*rnd(1,1.25);
   for(let i=0;i<14;i++){ const sy=by+Math.random()*bandH, sh=bandH*(0.08+Math.random()*0.2);
-    const ox=(Math.random()*2-1)*w*0.5; ctx.drawImage(canvas,0,sy,w,sh, ox,sy,w,sh); }
+    ctx.drawImage(canvas,0,sy,w,sh,(Math.random()*2-1)*w*0.5,sy,w,sh); }
   for(let i=0;i<160;i++){ const v=r255();
     ctx.fillStyle='rgba('+v+','+v+','+v+','+(0.15+Math.random()*0.4)+')';
     ctx.fillRect(Math.random()*w, by+Math.random()*bandH, 2+Math.random()*4, 1+Math.random()*2); }
 }
 
-function fxMosh(fx,p,w,h){
-  const k=1-p;
-  ctx.save(); ctx.globalAlpha=0.15+0.8*k;
-  const blocks=10+Math.floor(Math.random()*10);
-  for(let i=0;i<blocks;i++){
-    const bw=w*(0.15+Math.random()*0.4), bh=h*(0.06+Math.random()*0.2);
-    const bx=Math.random()*(w-bw), by=Math.random()*(h-bh);
-    const dx=(Math.random()*2-1)*w*0.05*(0.5+k), dy=(Math.random()*2-1)*h*0.03*(0.5+k);
-    ctx.drawImage(prevCv, bx,by,bw,bh, bx+dx,by+dy,bw,bh);     // 前フレームをブロックでスメア
-  }
-  ctx.restore();
-  ctx.save(); ctx.globalAlpha=0.22*k; ctx.drawImage(prevCv,0,0); ctx.restore(); // 全体ゴースト
-  if(Math.random()<0.6){ ctx.save(); ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=0.3*k;
-    for(let i=0;i<6;i++){ ctx.fillStyle='rgb('+r255()+','+r255()+','+r255()+')';
-      ctx.fillRect(Math.random()*w,Math.random()*h,w*(0.1+Math.random()*0.2),h*0.04); } ctx.restore(); }
-}
-
-function makeSprayDots(){
-  const n=14+Math.floor(Math.random()*10), a=[];
-  for(let i=0;i<n;i++) a.push({x:Math.random(),y:Math.random(),r:canvas.width*(0.05+Math.random()*0.12),t:Math.random()*0.75});
-  return a;
-}
-function fxSpray(fx,p,w,h){
-  const reveal=1-(1-p)*(1-p);                  // easeOut
-  ctx.drawImage(frzCv,0,0);                     // 凍結した前カットで覆う
-  ctx.save(); ctx.beginPath();                  // スプレーの穴をクリップに
-  for(const d of fx.dots){ if(d.t<=reveal){
-    const r=d.r*Math.min(1,(reveal-d.t)/0.25+0.35);
-    ctx.moveTo(d.x*w+r, d.y*h); ctx.arc(d.x*w, d.y*h, r, 0, 6.283);
-    for(let s=0;s<10;s++){ const a=Math.random()*6.283, rr=r*(1+Math.random()*0.7), sr=2+Math.random()*3;
-      ctx.moveTo(d.x*w+Math.cos(a)*rr+sr, d.y*h+Math.sin(a)*rr); ctx.arc(d.x*w+Math.cos(a)*rr, d.y*h+Math.sin(a)*rr, sr,0,6.283); }
-  }}
-  ctx.clip(); ctx.drawImage(cam,0,0,w,h);       // 穴から現在のカメラ映像を露出
-  ctx.restore();
-  if(p>0.7){ ctx.save(); ctx.globalAlpha=(p-0.7)/0.3; ctx.drawImage(cam,0,0,w,h); ctx.restore(); } // 仕上げ
-  // 縁のスプレー飛沫（カラー）
-  ctx.save(); ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=0.3*(1-p); ctx.fillStyle=fx.color;
-  for(let i=0;i<26;i++) ctx.fillRect(Math.random()*w,Math.random()*h,2,2); ctx.restore();
-}
-
 function fxStrobe(fx,p,w,h){
   const phase=Math.floor(p*fx.flashes);
-  if(phase%2===1){
-    const r=(phase*7+fx.seed)%3;
+  if(phase%2===1){ const r=(phase*7+fx.seed)%3;
     if(r===0){ ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h); }
     else if(r===1){ ctx.fillStyle='#000'; ctx.fillRect(0,0,w,h); }
     else { ctx.save(); ctx.globalCompositeOperation='difference'; ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h); ctx.restore(); }
   } else if(Math.random()<0.5){
     ctx.save(); ctx.globalCompositeOperation='overlay'; ctx.globalAlpha=0.55; ctx.fillStyle='#808080'; ctx.fillRect(0,0,w,h); ctx.restore();
   }
+}
+
+/* ===== 手書き日付タグ（Rock Salt） ===== */
+function dateStr(d){ return d.getFullYear()+'.'+(d.getMonth()+1)+'.'+d.getDate(); }
+function fireTag(){
+  tagUntil=performance.now()+1600;
+  tag={ x:rnd(0.06,0.30), y:rnd(0.64,0.86), rot:rnd(-0.16,0.04),
+        color:STREET[Math.floor(Math.random()*STREET.length)],
+        size:rnd(0.052,0.072), text:dateStr(new Date()) };
+}
+function drawTag(w,h){
+  if(!tag || performance.now()>=tagUntil) return;
+  const life=1-(tagUntil-performance.now())/1600;     // 0→1
+  const fade = life<0.82 ? 1 : 1-(life-0.82)/0.18;    // 終盤フェード
+  const reveal = Math.min(1, life/0.4);               // 前半で書き出す
+  const fs=Math.round(h*tag.size), txt=tag.text;
+  ctx.save();
+  ctx.translate(tag.x*w, tag.y*h); ctx.rotate(tag.rot);
+  ctx.font=fs+"px 'Rock Salt', cursive"; ctx.textBaseline='alphabetic';
+  const tw=ctx.measureText(txt).width;
+  ctx.beginPath(); ctx.rect(-fs*0.4, -fs*1.5, tw*reveal+fs*0.4, fs*2.0); ctx.clip();  // 左から出現
+  ctx.globalAlpha=fade;
+  ctx.lineJoin='round'; ctx.lineWidth=Math.max(2,fs*0.10); ctx.strokeStyle='rgba(0,0,0,0.55)'; ctx.strokeText(txt,0,0);
+  ctx.fillStyle=tag.color; ctx.fillText(txt,0,0);
+  if(reveal>0.55){ ctx.strokeStyle=tag.color; ctx.lineWidth=Math.max(2,fs*0.09);
+    ctx.beginPath(); const uy=fs*0.28; ctx.moveTo(0,uy);
+    for(let i=1;i<=8;i++) ctx.lineTo(tw*i/8, uy+Math.sin(i*1.7)*fs*0.06); ctx.stroke(); }
+  ctx.restore();
 }
 
 /* ===== HUD（タイムコード等・薄く常駐） ===== */
@@ -244,18 +263,13 @@ function timecode(){
 function bracket(x,y,sx,sy,L){ ctx.beginPath(); ctx.moveTo(x+sx*L,y); ctx.lineTo(x,y); ctx.lineTo(x,y+sy*L); ctx.stroke(); }
 function drawHUD(w,h){
   ctx.save();
-  // 走査線（パターンで1回描画＝軽量）
   ctx.globalAlpha=0.08; ctx.fillStyle=scanPat; ctx.fillRect(0,0,w,h); ctx.globalAlpha=1;
   const fs=Math.max(12,Math.round(h*0.030)), pad=Math.round(h*0.035);
   ctx.font=fs+'px ui-monospace, Menlo, monospace'; ctx.textBaseline='top';
-  // REC（点滅）
   if(Math.floor(Date.now()/500)%2===0){ ctx.fillStyle='rgba(255,59,48,0.95)';
     ctx.beginPath(); ctx.arc(pad+fs*0.35, pad+fs*0.55, fs*0.32, 0, 6.283); ctx.fill(); }
   ctx.fillStyle='rgba(255,255,255,0.85)'; ctx.fillText('REC', pad+fs*0.9, pad);
-  // タイムコード（右上）
-  const tc=timecode(), tw=ctx.measureText(tc).width;
-  ctx.fillText(tc, w-pad-tw, pad);
-  // 四隅ブラケット
+  const tc=timecode(), tw=ctx.measureText(tc).width; ctx.fillText(tc, w-pad-tw, pad);
   ctx.strokeStyle='rgba(255,255,255,0.45)'; ctx.lineWidth=Math.max(1.5,h*0.004);
   const L=Math.round(w*0.045), m=pad;
   bracket(m,m,1,1,L); bracket(w-m,m,-1,1,L); bracket(m,h-m,1,-1,L); bracket(w-m,h-m,-1,-1,L);
@@ -275,7 +289,7 @@ function startHold(){
   if(!recorder || holding || accMs>=MAX_MS || resultEl.classList.contains('show')) return;
   holding=true; shutter.classList.add('holding'); view.classList.add('recording'); finishBtn.disabled=true;
   if(!started){ recorder.start(); started=true; } else { recorder.resume(); }
-  fireTransition();                          // 押した瞬間にランダムなトランジション
+  fireTransition(); fireTag();               // 押した瞬間にトランジション＋日付タグ
   holdStart=performance.now(); rafMeter=requestAnimationFrame(meter);
 }
 function endHold(reachedMax){
@@ -313,7 +327,7 @@ async function save(){
 }
 function reset(){
   resultEl.classList.remove('show');
-  chunks=[]; lastBlob=null; accMs=0; holding=false; started=false; fx=null;
+  chunks=[]; lastBlob=null; accMs=0; holding=false; started=false; fx=null; tag=null;
   shutter.disabled=false; finishBtn.disabled=true; render(0); makeRecorder();
 }
 
