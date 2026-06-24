@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Hand Tracking → WebSocket</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: system-ui, -apple-system, "Hiragino Sans", sans-serif;
+    background: #0d0f12; color: #e8eaed; -webkit-text-size-adjust: 100%;
+  }
+  header { padding: 12px 14px 4px; }
+  h1 { font-size: 15px; margin: 0 0 2px; font-weight: 600; letter-spacing: .02em; }
+  .sub { font-size: 12px; color: #9aa0a6; margin: 0; }
+  .panel { padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  input, select, button {
+    font-size: 14px; border-radius: 10px; border: 1px solid #2a2f37;
+    background: #161a20; color: #e8eaed; padding: 10px 12px; outline: none;
+  }
+  input { flex: 1; min-width: 0; }
+  button {
+    background: #3b6cf0; border-color: #3b6cf0; font-weight: 600;
+    white-space: nowrap; -webkit-tap-highlight-color: transparent;
+  }
+  button.secondary { background: #161a20; border-color: #2a2f37; }
+  button:disabled { opacity: .45; }
+  .stage {
+    position: relative; width: 100%; aspect-ratio: 3/4;
+    background: #000; overflow: hidden; border-top: 1px solid #1c2128; border-bottom: 1px solid #1c2128;
+  }
+  video, canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  video { transform: scaleX(-1); } canvas { transform: scaleX(-1); }
+  .status {
+    padding: 8px 14px; font-size: 12px; color: #9aa0a6;
+    display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #555; margin-right: 5px; vertical-align: middle; }
+  .dot.on { background: #34c759; } .dot.err { background: #ff453a; }
+  code { color: #c9d1d9; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ハンドトラッキング → WebSocket</h1>
+  <p class="sub">スマホのカメラで手を検出し、ランドマークを送信します</p>
+</header>
+
+<div class="panel">
+  <div class="row">
+    <input id="wsUrl" type="text" inputmode="url" autocapitalize="off" autocorrect="off"
+           placeholder="wss://your-server.example/ws" value="">
+  </div>
+  <div class="row">
+    <select id="facing">
+      <option value="user">フロントカメラ</option>
+      <option value="environment">リアカメラ</option>
+    </select>
+    <select id="rate">
+      <option value="0">送信: 毎フレーム</option>
+      <option value="30" selected>送信: 30fps</option>
+      <option value="15">送信: 15fps</option>
+      <option value="10">送信: 10fps</option>
+    </select>
+  </div>
+  <div class="row">
+    <button id="startBtn">開始</button>
+    <button id="stopBtn" class="secondary" disabled>停止</button>
+  </div>
+</div>
+
+<div class="stage">
+  <video id="video" playsinline muted></video>
+  <canvas id="canvas"></canvas>
+</div>
+
+<div class="status">
+  <span><span id="wsDot" class="dot"></span><span id="wsText">WS: 未接続</span></span>
+  <span id="fpsText">– fps</span>
+  <span id="handsText">手: 0</span>
+</div>
+
+<script type="module">
+import { FilesetResolver, HandLandmarker }
+  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs";
+
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const startBtn = document.getElementById("startBtn");
+const stopBtn = document.getElementById("stopBtn");
+const wsUrlInput = document.getElementById("wsUrl");
+const facingSel = document.getElementById("facing");
+const rateSel = document.getElementById("rate");
+const wsDot = document.getElementById("wsDot");
+const wsText = document.getElementById("wsText");
+const fpsText = document.getElementById("fpsText");
+const handsText = document.getElementById("handsText");
+
+// 指の接続定義（21ランドマークのスケルトン描画用）
+const CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],
+  [13,17],[17,18],[18,19],[19,20],[0,17]
+];
+
+let handLandmarker = null;
+let stream = null;
+let ws = null;
+let running = false;
+let raf = 0;
+let lastSent = 0;
+let lastFpsT = performance.now();
+let frames = 0;
+
+async function initModel() {
+  if (handLandmarker) return;
+  startBtn.textContent = "モデル読込中…";
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+  );
+  handLandmarker = await HandLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      delegate: "GPU"  // スマホでは GPU 推奨。失敗時は "CPU" に変更
+    },
+    numHands: 2,
+    runningMode: "VIDEO"
+  });
+  startBtn.textContent = "開始";
+}
+
+function connectWS() {
+  const url = wsUrlInput.value.trim();
+  if (!url) return;
+  try {
+    ws = new WebSocket(url);
+    wsDot.className = "dot"; wsText.textContent = "WS: 接続中…";
+    ws.onopen = () => { wsDot.className = "dot on"; wsText.textContent = "WS: 接続済み"; };
+    ws.onclose = () => { wsDot.className = "dot"; wsText.textContent = "WS: 切断"; };
+    ws.onerror = () => { wsDot.className = "dot err"; wsText.textContent = "WS: エラー"; };
+  } catch (e) {
+    wsDot.className = "dot err"; wsText.textContent = "WS: URL不正";
+  }
+}
+
+async function start() {
+  try {
+    await initModel();
+    if (wsUrlInput.value.trim()) connectWS();
+
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: facingSel.value, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    running = true;
+    startBtn.disabled = true; stopBtn.disabled = false;
+    loop();
+  } catch (e) {
+    alert("カメラ起動に失敗しました: " + e.message +
+      "\n\n※ カメラは HTTPS（または localhost）でのみ使用できます。");
+  }
+}
+
+function stop() {
+  running = false;
+  cancelAnimationFrame(raf);
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  if (ws && ws.readyState === WebSocket.OPEN) ws.close();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  startBtn.disabled = false; stopBtn.disabled = true;
+  fpsText.textContent = "– fps"; handsText.textContent = "手: 0";
+}
+
+function loop() {
+  if (!running) return;
+  if (video.readyState >= 2) {
+    const now = performance.now();
+    let result = null;
+    try { result = handLandmarker.detectForVideo(video, now); } catch (e) {}
+    if (result) { draw(result); maybeSend(result, now); }
+
+    // FPS 計測
+    frames++;
+    if (now - lastFpsT >= 500) {
+      fpsText.textContent = Math.round(frames * 1000 / (now - lastFpsT)) + " fps";
+      frames = 0; lastFpsT = now;
+    }
+  }
+  raf = requestAnimationFrame(loop);
+}
+
+function draw(result) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const hands = result.landmarks || [];
+  handsText.textContent = "手: " + hands.length;
+  for (const lm of hands) {
+    ctx.strokeStyle = "#3b6cf0"; ctx.lineWidth = 4;
+    for (const [a, b] of CONNECTIONS) {
+      ctx.beginPath();
+      ctx.moveTo(lm[a].x * canvas.width, lm[a].y * canvas.height);
+      ctx.lineTo(lm[b].x * canvas.width, lm[b].y * canvas.height);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#34c759";
+    for (const p of lm) {
+      ctx.beginPath();
+      ctx.arc(p.x * canvas.width, p.y * canvas.height, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+function maybeSend(result, now) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const fps = parseInt(rateSel.value, 10);
+  if (fps > 0) {
+    const interval = 1000 / fps;
+    if (now - lastSent < interval) return;
+    lastSent = now;
+  }
+  const hands = (result.landmarks || []).map((lm, i) => ({
+    handedness: result.handedness?.[i]?.[0]?.categoryName ?? null,
+    score: result.handedness?.[i]?.[0]?.score ?? null,
+    landmarks: lm.map(p => ({ x: p.x, y: p.y, z: p.z })),
+    worldLandmarks: (result.worldLandmarks?.[i] || []).map(p => ({ x: p.x, y: p.y, z: p.z }))
+  }));
+  ws.send(JSON.stringify({ t: Math.round(now), hands }));
+}
+
+startBtn.addEventListener("click", start);
+stopBtn.addEventListener("click", stop);
+</script>
+</body>
+</html>
