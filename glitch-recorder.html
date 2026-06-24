@@ -154,7 +154,6 @@ function fireTransition(){
   fx={kind, start:performance.now(), dur:base*rnd(0.8,1.3)};
   if(kind==='chroma') fx.angle=Math.random()<0.7 ? rnd(-0.25,0.25) : rnd(0,6.283);
   if(kind==='shuffle'){ fx.cols=6+Math.floor(Math.random()*7); fx.rows=4+Math.floor(Math.random()*5); }
-  if(kind==='vhs') fx.band=rnd(0.06,0.14);
   if(kind==='strobe'){ fx.flashes=4+Math.floor(Math.random()*5); fx.seed=Math.floor(Math.random()*9); }
 }
 function applyFx(fx,p,w,h){
@@ -202,17 +201,11 @@ function fxVHS(fx,p,w,h){
   const k=1-p;
   ctx.save(); ctx.globalCompositeOperation='screen'; ctx.globalAlpha=0.4;
   const gx=w*0.012*(0.6+k); ctx.drawImage(canvas,gx,0); ctx.drawImage(canvas,-gx,0); ctx.restore();
-  const rows=6+Math.floor(Math.random()*8);
+  const rows=4+Math.floor(Math.random()*4);
   for(let i=0;i<rows;i++){ const sy=Math.random()*h, sh=h*(0.01+Math.random()*0.03);
     ctx.drawImage(canvas,0,sy,w,sh,(Math.random()*2-1)*w*0.06*k,sy,w,sh); }
   ctx.save(); ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=0.5*k; ctx.fillStyle='#fff';
   for(let i=0;i<2;i++) ctx.fillRect(0,Math.random()*h,w,1+Math.random()*2); ctx.restore();
-  const bandH=h*fx.band, by=h-bandH*rnd(1,1.25);
-  for(let i=0;i<14;i++){ const sy=by+Math.random()*bandH, sh=bandH*(0.08+Math.random()*0.2);
-    ctx.drawImage(canvas,0,sy,w,sh,(Math.random()*2-1)*w*0.5,sy,w,sh); }
-  for(let i=0;i<160;i++){ const v=r255();
-    ctx.fillStyle='rgba('+v+','+v+','+v+','+(0.15+Math.random()*0.4)+')';
-    ctx.fillRect(Math.random()*w, by+Math.random()*bandH, 2+Math.random()*4, 1+Math.random()*2); }
 }
 
 function fxStrobe(fx,p,w,h){
@@ -229,28 +222,23 @@ function fxStrobe(fx,p,w,h){
 /* ===== 手書き日付タグ（Rock Salt） ===== */
 function dateStr(d){ return d.getFullYear()+'.'+(d.getMonth()+1)+'.'+d.getDate(); }
 function fireTag(){
-  tagUntil=performance.now()+1600;
-  tag={ x:rnd(0.06,0.30), y:rnd(0.64,0.86), rot:rnd(-0.16,0.04),
-        color:STREET[Math.floor(Math.random()*STREET.length)],
-        size:rnd(0.052,0.072), text:dateStr(new Date()) };
+  tagUntil=performance.now()+1900;
+  tag={ x:rnd(0.10,0.26), y:rnd(0.50,0.68), rot:rnd(-0.42,-0.28),
+        size:rnd(0.085,0.11), text:dateStr(new Date()) };
 }
 function drawTag(w,h){
   if(!tag || performance.now()>=tagUntil) return;
-  const life=1-(tagUntil-performance.now())/1600;     // 0→1
-  const fade = life<0.82 ? 1 : 1-(life-0.82)/0.18;    // 終盤フェード
+  const life=1-(tagUntil-performance.now())/1900;     // 0→1
+  const fade = life<0.85 ? 1 : 1-(life-0.85)/0.15;    // 終盤フェード
   const reveal = Math.min(1, life/0.4);               // 前半で書き出す
   const fs=Math.round(h*tag.size), txt=tag.text;
   ctx.save();
   ctx.translate(tag.x*w, tag.y*h); ctx.rotate(tag.rot);
   ctx.font=fs+"px 'Rock Salt', cursive"; ctx.textBaseline='alphabetic';
   const tw=ctx.measureText(txt).width;
-  ctx.beginPath(); ctx.rect(-fs*0.4, -fs*1.5, tw*reveal+fs*0.4, fs*2.0); ctx.clip();  // 左から出現
+  ctx.beginPath(); ctx.rect(-fs*0.4, -fs*1.6, tw*reveal+fs*0.4, fs*2.2); ctx.clip();  // 左から出現
   ctx.globalAlpha=fade;
-  ctx.lineJoin='round'; ctx.lineWidth=Math.max(2,fs*0.10); ctx.strokeStyle='rgba(0,0,0,0.55)'; ctx.strokeText(txt,0,0);
-  ctx.fillStyle=tag.color; ctx.fillText(txt,0,0);
-  if(reveal>0.55){ ctx.strokeStyle=tag.color; ctx.lineWidth=Math.max(2,fs*0.09);
-    ctx.beginPath(); const uy=fs*0.28; ctx.moveTo(0,uy);
-    for(let i=1;i<=8;i++) ctx.lineTo(tw*i/8, uy+Math.sin(i*1.7)*fs*0.06); ctx.stroke(); }
+  ctx.fillStyle='#000'; ctx.fillText(txt,0,0);        // 黒・袋文字なし・下線なし
   ctx.restore();
 }
 
@@ -288,8 +276,8 @@ function meter(){
 function startHold(){
   if(!recorder || holding || accMs>=MAX_MS || resultEl.classList.contains('show')) return;
   holding=true; shutter.classList.add('holding'); view.classList.add('recording'); finishBtn.disabled=true;
-  if(!started){ recorder.start(); started=true; } else { recorder.resume(); }
-  fireTransition(); fireTag();               // 押した瞬間にトランジション＋日付タグ
+  if(!started){ recorder.start(); started=true; fireTag(); } else { recorder.resume(); } // タグは最初だけ
+  fireTransition();                          // 押した瞬間にトランジション
   holdStart=performance.now(); rafMeter=requestAnimationFrame(meter);
 }
 function endHold(reachedMax){
