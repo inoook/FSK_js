@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>押している間だけ録画（録画中カメラ切替）</title>
+<style>
+  :root{ --bg:#0b0d10; --fg:#f4f5f7; --muted:#8b929c; --rec:#ff3b30; --ok:#34c759; --line:#2a2e35; }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;overscroll-behavior:none}
+  #stage{position:fixed;inset:0;display:flex;flex-direction:column}
+  .view{position:relative;flex:1;background:#000;overflow:hidden}
+  #cam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;opacity:0}
+  #preview{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:2;background:#000}
+  .track{position:absolute;top:max(10px,env(safe-area-inset-top));left:12px;right:12px;
+    height:4px;border-radius:99px;background:rgba(255,255,255,.25);overflow:hidden;z-index:3}
+  .track>i{display:block;height:100%;width:0;background:var(--fg)}
+  .recording .track>i{background:var(--rec)}
+  .controls{position:absolute;top:max(26px,calc(env(safe-area-inset-top) + 14px));left:0;right:0;
+    display:flex;justify-content:center;flex-wrap:wrap;gap:8px;z-index:4;padding:0 12px}
+  .controls select{appearance:none;-webkit-appearance:none;background:rgba(0,0,0,.45);color:#fff;
+    border:1px solid rgba(255,255,255,.28);border-radius:99px;padding:8px 30px 8px 14px;font-size:13px;
+    backdrop-filter:blur(6px);max-width:52vw;text-overflow:ellipsis;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M0 0l5 6 5-6z' fill='%23fff'/></svg>");
+    background-repeat:no-repeat;background-position:right 12px center}
+  .controls select:disabled{opacity:.4}
+  .actual{position:absolute;top:max(66px,calc(env(safe-area-inset-top) + 54px));left:0;right:0;
+    text-align:center;font-size:11px;color:var(--muted);z-index:4;pointer-events:none;font-variant-numeric:tabular-nums}
+  .clock{position:absolute;left:0;right:0;bottom:42px;text-align:center;font-variant-numeric:tabular-nums;
+    font-size:13px;letter-spacing:.04em;color:var(--muted);z-index:3;pointer-events:none}
+  .recdot{display:none;width:8px;height:8px;border-radius:50%;background:var(--rec);
+    vertical-align:middle;margin-right:6px;animation:blink 1s steps(2,end) infinite}
+  .recording .recdot{display:inline-block}
+  @keyframes blink{50%{opacity:0}}
+  .hint{position:absolute;left:0;right:0;bottom:14px;text-align:center;font-size:12px;
+    color:var(--muted);z-index:3;pointer-events:none}
+  .bar{display:flex;align-items:center;justify-content:space-between;
+    padding:18px 26px calc(20px + env(safe-area-inset-bottom));gap:16px;background:var(--bg)}
+  .slot{width:64px;display:flex;justify-content:center}
+  .txt{background:none;border:0;color:var(--fg);font-size:15px;padding:10px;cursor:pointer}
+  .txt:disabled{color:var(--line)}
+  #shutter{width:74px;height:74px;border-radius:50%;border:4px solid var(--fg);background:transparent;
+    padding:5px;display:grid;place-items:center;cursor:pointer;touch-action:none;
+    -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  #shutter>span{width:100%;height:100%;border-radius:50%;background:var(--rec);transition:border-radius .15s,transform .15s}
+  #shutter:disabled{opacity:.35}
+  #shutter.holding>span{border-radius:30%;transform:scale(.7)}
+  #result{position:fixed;inset:0;background:var(--bg);z-index:9;display:none;flex-direction:column;
+    padding:max(16px,env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom))}
+  #result.show{display:flex}
+  #result video{position:static;flex:1;border-radius:14px;object-fit:contain;background:#000}
+  .rbar{display:flex;gap:12px;padding-top:14px}
+  .btn{flex:1;text-align:center;text-decoration:none;padding:15px;border-radius:12px;font-size:16px;font-weight:600;border:0;cursor:pointer}
+  .btn.dl{background:var(--ok);color:#04270f}
+  .btn.again{background:var(--line);color:var(--fg)}
+  .note{padding-top:10px;font-size:12px;color:var(--muted);text-align:center;line-height:1.6}
+  #msg{position:fixed;inset:0;display:none;place-items:center;padding:32px;text-align:center;
+    color:var(--muted);font-size:15px;line-height:1.7;z-index:20;white-space:pre-line}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="view" id="view">
+    <video id="cam" autoplay muted playsinline></video>
+    <canvas id="preview"></canvas>
+    <div class="track"><i id="bar"></i></div>
+    <div class="controls">
+      <select id="camSel" aria-label="カメラ"></select>
+      <select id="resSel" aria-label="解像度">
+        <option value="640x480">480p</option>
+        <option value="1280x720">720p</option>
+        <option value="1920x1080" selected>1080p</option>
+        <option value="3840x2160">4K</option>
+      </select>
+    </div>
+    <div class="actual" id="actual"></div>
+    <div class="clock"><span class="recdot"></span><span id="time">0.0 / 15.0s</span></div>
+    <div class="hint">押している間だけ録画／録画中もカメラ切替OK</div>
+  </div>
+  <div class="bar">
+    <div class="slot"></div>
+    <button id="shutter" aria-label="押している間だけ録画"><span></span></button>
+    <div class="slot"><button id="finish" class="txt" disabled>完了</button></div>
+  </div>
+</div>
+
+<div id="result">
+  <video id="out" controls playsinline></video>
+  <div class="rbar">
+    <button id="retake" class="btn again">撮り直す</button>
+    <button id="save" class="btn dl">保存</button>
+  </div>
+  <div class="note" id="savehint"></div>
+</div>
+
+<div id="msg"></div>
+
+<script>
+const MAX_MS = 15000;
+const $ = s => document.querySelector(s);
+const cam=$('#cam'), canvas=$('#preview'), shutter=$('#shutter'), finishBtn=$('#finish'),
+      bar=$('#bar'), timeEl=$('#time'), view=$('#view'), camSel=$('#camSel'), resSel=$('#resSel'),
+      actual=$('#actual'), resultEl=$('#result'), out=$('#out'), saveBtn=$('#save'),
+      retake=$('#retake'), saveHint=$('#savehint'), msg=$('#msg');
+const ctx=canvas.getContext('2d');
+
+let audioStream=null, camStream=null, recordStream=null, recorder=null;
+let chunks=[], mime='', lastBlob=null;
+let accMs=0, holding=false, started=false, holdStart=0, rafMeter=0;
+let curDeviceId=null, curRes={w:1920,h:1080};
+
+function fail(t){msg.textContent=t;msg.style.display='grid';}
+
+function pickMime(){
+  const c=['video/mp4','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
+  return c.find(m=>window.MediaRecorder&&MediaRecorder.isTypeSupported(m))||'';
+}
+function makeRecorder(){
+  recorder=new MediaRecorder(recordStream, mime?{mimeType:mime}:undefined);
+  recorder.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
+  recorder.onstop=finalize;
+}
+function rebuildRecordStream(){
+  recordStream=canvas.captureStream(30);                  // canvas を録画ソースに
+  if(audioStream) audioStream.getAudioTracks().forEach(t=>recordStream.addTrack(t)); // 音声は生かし続ける
+  makeRecorder();
+}
+
+/* ===== 映像ストリーム（音声は含めない＝切替時も音を切らないため） ===== */
+function getVideoStream(deviceId,res){
+  const v={ width:{ideal:res.w}, height:{ideal:res.h} };
+  if(deviceId) v.deviceId={exact:deviceId}; else v.facingMode='environment';
+  return navigator.mediaDevices.getUserMedia({ video:v, audio:false });
+}
+
+async function refreshCams(selectedId){
+  let devs=[]; try{ devs=await navigator.mediaDevices.enumerateDevices(); }catch(_){}
+  const cams=devs.filter(d=>d.kind==='videoinput');
+  if(!cams.length) return;
+  camSel.innerHTML='';
+  cams.forEach((d,i)=>{ const o=document.createElement('option');
+    o.value=d.deviceId; o.textContent=d.label||('カメラ '+(i+1)); camSel.appendChild(o); });
+  if(selectedId) camSel.value=selectedId;
+}
+
+function updateActual(){
+  const cs=camStream&&camStream.getVideoTracks()[0].getSettings();
+  actual.textContent='出力 '+canvas.width+'×'+canvas.height+
+    (cs?'  /  カメラ '+(cs.width||'?')+'×'+(cs.height||'?'):'');
+}
+
+/* ===== 描画（cover で歪ませず固定サイズに収める） ===== */
+function draw(){
+  const cw=canvas.width,ch=canvas.height;
+  if(cam.videoWidth&&cam.videoHeight){           // 切替中で未準備のときは直前フレームのまま（=一瞬の静止）
+    const s=Math.max(cw/cam.videoWidth, ch/cam.videoHeight);
+    const dw=cam.videoWidth*s, dh=cam.videoHeight*s;
+    ctx.drawImage(cam,(cw-dw)/2,(ch-dh)/2,dw,dh);
+  }
+  requestAnimationFrame(draw);
+}
+
+async function init(){
+  if(!navigator.mediaDevices?.getUserMedia) return fail('このブラウザはカメラ取得に対応していません。');
+  if(!window.MediaRecorder) return fail('このブラウザはMediaRecorderに非対応です。');
+  try{ audioStream=await navigator.mediaDevices.getUserMedia({audio:true}); }catch(_){ audioStream=null; }
+  canvas.width=curRes.w; canvas.height=curRes.h;
+  requestAnimationFrame(draw);
+  try{ camStream=await getVideoStream(null,curRes); }
+  catch(e){ return fail('カメラを開始できませんでした（権限・HTTPSを確認）。\n'+e.message); }
+  cam.srcObject=camStream; cam.play().catch(()=>{});
+  curDeviceId=(camStream.getVideoTracks()[0].getSettings().deviceId)||null;
+  mime=pickMime();
+  rebuildRecordStream();
+  updateActual();
+  await refreshCams(curDeviceId);
+}
+
+/* ===== カメラ切替（録画中でも呼べる：recorder には触れない） ===== */
+async function switchCamera(id){
+  camSel.disabled=true;
+  if(camStream) camStream.getVideoTracks().forEach(t=>t.stop());   // 同時に1台しか開けない端末向けに先に停止
+  try{ camStream=await getVideoStream(id,curRes); }
+  catch(e){ fail('カメラ切替に失敗しました。\n'+e.message); camSel.disabled=false; return; }
+  cam.srcObject=camStream; cam.play().catch(()=>{});
+  curDeviceId=(camStream.getVideoTracks()[0].getSettings().deviceId)||id;
+  updateActual(); await refreshCams(curDeviceId);
+  camSel.disabled=false;
+}
+
+/* ===== 解像度変更（録画中は不可：canvas サイズ＝出力サイズが変わるため） ===== */
+async function changeResolution(res){
+  if(started) return;
+  camSel.disabled=true; resSel.disabled=true; shutter.disabled=true;
+  curRes=res; canvas.width=res.w; canvas.height=res.h;
+  if(camStream) camStream.getVideoTracks().forEach(t=>t.stop());
+  try{ camStream=await getVideoStream(curDeviceId,curRes); }
+  catch(e){ fail('解像度変更に失敗しました。\n'+e.message); }
+  if(camStream){ cam.srcObject=camStream; cam.play().catch(()=>{}); }
+  rebuildRecordStream();                          // canvas サイズが変わったので張り直し
+  updateActual();
+  camSel.disabled=false; resSel.disabled=false; shutter.disabled=false;
+}
+
+/* ===== 録画（押している間だけ） ===== */
+function render(cur){
+  bar.style.width=Math.min(cur/MAX_MS*100,100)+'%';
+  timeEl.textContent=(Math.min(cur,MAX_MS)/1000).toFixed(1)+' / 15.0s';
+}
+function meter(){
+  if(!holding) return;
+  const cur=accMs+(performance.now()-holdStart);
+  render(cur);
+  if(cur>=MAX_MS){ accMs=MAX_MS; endHold(true); finishRecording(); return; }
+  rafMeter=requestAnimationFrame(meter);
+}
+function startHold(){
+  if(!recorder || holding || accMs>=MAX_MS || resultEl.classList.contains('show')) return;
+  holding=true;
+  shutter.classList.add('holding'); view.classList.add('recording');
+  finishBtn.disabled=true;
+  if(!started){ recorder.start(); started=true; resSel.disabled=true; } else { recorder.resume(); }
+  holdStart=performance.now();
+  rafMeter=requestAnimationFrame(meter);
+}
+function endHold(reachedMax){
+  if(!holding) return;
+  holding=false; cancelAnimationFrame(rafMeter);
+  accMs += performance.now()-holdStart;
+  if(reachedMax) accMs=MAX_MS;
+  if(recorder.state==='recording') recorder.pause();
+  shutter.classList.remove('holding'); view.classList.remove('recording');
+  render(accMs);
+  if(accMs<MAX_MS) finishBtn.disabled=false;
+}
+function finishRecording(){
+  finishBtn.disabled=true; shutter.disabled=true;
+  if(recorder && recorder.state!=='inactive') recorder.stop();
+}
+
+/* ===== 結果・保存 ===== */
+function ext(){ return (lastBlob&&lastBlob.type.includes('mp4'))?'mp4':'webm'; }
+function finalize(){
+  if(!chunks.length) return;
+  const type=chunks[0].type||mime||'video/webm';
+  lastBlob=new Blob(chunks,{type});
+  out.src=URL.createObjectURL(lastBlob);
+  const ok = navigator.canShare && navigator.canShare({files:[new File([lastBlob],'v.'+ext(),{type})]});
+  saveHint.textContent = ok
+    ? '「保存」→ 共有シートの「ビデオを保存」でカメラロールに入ります。'
+    : 'この端末では共有保存が使えないため、保存するとファイルとしてダウンロードされます。';
+  resultEl.classList.add('show');
+}
+async function save(){
+  if(!lastBlob) return;
+  const file=new File([lastBlob], 'recording-'+Date.now()+'.'+ext(), {type:lastBlob.type});
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    try{ await navigator.share({files:[file], title:'録画動画'}); return; }
+    catch(e){ if(e.name==='AbortError') return; }
+  }
+  const a=document.createElement('a'); a.href=URL.createObjectURL(lastBlob); a.download=file.name;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function reset(){
+  resultEl.classList.remove('show');
+  chunks=[]; lastBlob=null; accMs=0; holding=false; started=false;
+  shutter.disabled=false; finishBtn.disabled=true; resSel.disabled=false; camSel.disabled=false;
+  render(0); makeRecorder();                       // ストリームは生かしたまま recorder だけ作り直し
+}
+
+/* ===== 入力 ===== */
+camSel.addEventListener('change', ()=>switchCamera(camSel.value));      // 録画中でもOK
+resSel.addEventListener('change', ()=>{ const [w,h]=resSel.value.split('x').map(Number); changeResolution({w,h}); });
+shutter.addEventListener('pointerdown',e=>{ e.preventDefault(); startHold(); });
+window.addEventListener('pointerup',()=>{ if(holding) endHold(false); });
+window.addEventListener('pointercancel',()=>{ if(holding) endHold(false); });
+shutter.addEventListener('contextmenu',e=>e.preventDefault());
+finishBtn.addEventListener('click',finishRecording);
+saveBtn.addEventListener('click',save);
+retake.addEventListener('click',reset);
+init();
+</script>
+</body>
+</html>
