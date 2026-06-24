@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>グリッチ録画</title>
+<style>
+  :root{ --bg:#07080a; --fg:#f4f5f7; --muted:#8b929c; --rec:#ff3b30; --ok:#34c759; --line:#2a2e35; }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;overscroll-behavior:none}
+  #stage{position:fixed;inset:0;display:flex;flex-direction:column}
+  .view{position:relative;flex:1;background:#000;overflow:hidden}
+  /* cam は描画ソース（裏でデコードさせるため非表示にはしない） */
+  #cam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;opacity:0}
+  #preview{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:2;background:#000}
+  .track{position:absolute;top:max(14px,env(safe-area-inset-top));left:12px;right:12px;
+    height:4px;border-radius:99px;background:rgba(255,255,255,.25);overflow:hidden;z-index:3}
+  .track>i{display:block;height:100%;width:0;background:var(--fg)}
+  .recording .track>i{background:var(--rec)}
+  .clock{position:absolute;top:max(28px,calc(env(safe-area-inset-top) + 14px));left:0;right:0;
+    text-align:center;font-variant-numeric:tabular-nums;font-size:13px;letter-spacing:.04em;
+    color:var(--muted);z-index:3;pointer-events:none}
+  .recdot{display:none;width:8px;height:8px;border-radius:50%;background:var(--rec);
+    vertical-align:middle;margin-right:6px;animation:blink 1s steps(2,end) infinite}
+  .recording .recdot{display:inline-block}
+  @keyframes blink{50%{opacity:0}}
+  .hint{position:absolute;left:0;right:0;bottom:14px;text-align:center;font-size:12px;
+    color:var(--muted);z-index:3;pointer-events:none}
+  .bar{display:flex;align-items:center;justify-content:space-between;
+    padding:18px 26px calc(20px + env(safe-area-inset-bottom));gap:16px;background:var(--bg)}
+  .slot{width:64px;display:flex;justify-content:center}
+  .txt{background:none;border:0;color:var(--fg);font-size:15px;padding:10px;cursor:pointer}
+  .txt:disabled{color:var(--line)}
+  #shutter{width:74px;height:74px;border-radius:50%;border:4px solid var(--fg);background:transparent;
+    padding:5px;display:grid;place-items:center;cursor:pointer;touch-action:none;
+    -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  #shutter>span{width:100%;height:100%;border-radius:50%;background:var(--rec);
+    transition:border-radius .15s,transform .15s}
+  #shutter:disabled{opacity:.35}
+  #shutter.holding>span{border-radius:30%;transform:scale(.7)}
+  #result{position:fixed;inset:0;background:var(--bg);z-index:9;display:none;flex-direction:column;
+    padding:max(16px,env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom))}
+  #result.show{display:flex}
+  #result video{position:static;flex:1;border-radius:14px;object-fit:contain;background:#000}
+  .rbar{display:flex;gap:12px;padding-top:14px}
+  .btn{flex:1;text-align:center;text-decoration:none;padding:15px;border-radius:12px;
+    font-size:16px;font-weight:600;border:0;cursor:pointer}
+  .btn.dl{background:var(--ok);color:#04270f}
+  .btn.again{background:var(--line);color:var(--fg)}
+  .note{padding-top:10px;font-size:12px;color:var(--muted);text-align:center;line-height:1.6}
+  #msg{position:fixed;inset:0;display:none;place-items:center;padding:32px;text-align:center;
+    color:var(--muted);font-size:15px;line-height:1.7;z-index:20;white-space:pre-line}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="view" id="view">
+    <video id="cam" autoplay muted playsinline></video>
+    <canvas id="preview"></canvas>
+    <div class="track"><i id="bar"></i></div>
+    <div class="clock"><span class="recdot"></span><span id="time">0.0 / 15.0s</span></div>
+    <div class="hint">押している間だけ録画／押すたびにグリッチ</div>
+  </div>
+  <div class="bar">
+    <div class="slot"></div>
+    <button id="shutter" aria-label="押している間だけ録画"><span></span></button>
+    <div class="slot"><button id="finish" class="txt" disabled>完了</button></div>
+  </div>
+</div>
+
+<div id="result">
+  <video id="out" controls playsinline></video>
+  <div class="rbar">
+    <button id="retake" class="btn again">撮り直す</button>
+    <button id="save" class="btn dl">保存</button>
+  </div>
+  <div class="note" id="savehint"></div>
+</div>
+
+<div id="msg"></div>
+
+<script>
+const MAX_MS = 15000;
+const $ = s => document.querySelector(s);
+const cam=$('#cam'), canvas=$('#preview'), shutter=$('#shutter'), finishBtn=$('#finish'),
+      bar=$('#bar'), timeEl=$('#time'), view=$('#view'),
+      resultEl=$('#result'), out=$('#out'), saveBtn=$('#save'),
+      retake=$('#retake'), saveHint=$('#savehint'), msg=$('#msg');
+const ctx=canvas.getContext('2d');
+
+let stream, recordStream, recorder, chunks=[], mime='', lastBlob=null;
+let accMs=0, holding=false, started=false, holdStart=0, rafMeter=0;
+let glitchUntil=0, glitchDur=0;
+
+function fail(t){msg.textContent=t;msg.style.display='grid';}
+const r255=()=>Math.floor(Math.random()*256);
+
+function pickMime(){
+  const c=['video/mp4','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
+  return c.find(m=>window.MediaRecorder&&MediaRecorder.isTypeSupported(m))||'';
+}
+function makeRecorder(){
+  recorder=new MediaRecorder(recordStream, mime?{mimeType:mime}:undefined);
+  recorder.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
+  recorder.onstop=finalize;
+}
+
+async function init(){
+  if(!navigator.mediaDevices?.getUserMedia) return fail('このブラウザはカメラ取得に対応していません。');
+  if(!window.MediaRecorder) return fail('このブラウザはMediaRecorderに非対応です。');
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}},
+      audio:true
+    });
+  }catch(e){return fail('カメラを開始できませんでした（権限とHTTPS接続を確認してください）。\n'+e.message);}
+  cam.srcObject=stream;
+  cam.onloadedmetadata=()=>{
+    cam.play().catch(()=>{});
+    // 録画解像度（長辺を1280に制限）
+    let vw=cam.videoWidth||1280, vh=cam.videoHeight||720;
+    const cap=1280, s=Math.min(1, cap/Math.max(vw,vh));
+    canvas.width=Math.round(vw*s); canvas.height=Math.round(vh*s);
+    requestAnimationFrame(draw);                          // 描画ループ開始
+    recordStream=canvas.captureStream(30);                // canvas を録画ソースに
+    stream.getAudioTracks().forEach(t=>recordStream.addTrack(t)); // 音声を合流
+    mime=pickMime();
+    makeRecorder();
+  };
+}
+
+/* ===== 描画＋グリッチ ===== */
+function draw(){
+  const w=canvas.width,h=canvas.height;
+  ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over';
+  ctx.drawImage(cam,0,0,w,h);                             // 通常のカメラ映像
+  const now=performance.now();
+  if(now<glitchUntil) glitch((glitchUntil-now)/glitchDur, w, h); // 残り時間で減衰
+  requestAnimationFrame(draw);
+}
+
+function glitch(inten, w, h){
+  // 1) 色収差っぽいゴースト
+  ctx.save();
+  ctx.globalCompositeOperation='screen';
+  ctx.globalAlpha=0.2+0.4*inten;
+  const gx=4+inten*w*0.02;
+  ctx.drawImage(canvas, gx,0);
+  ctx.drawImage(canvas,-gx,0);
+  ctx.restore();
+  // 2) 横スライスのずれ
+  const slices=3+Math.floor(Math.random()*6);
+  for(let i=0;i<slices;i++){
+    const sy=Math.random()*h, sh=h*(0.015+Math.random()*0.07);
+    const ox=(Math.random()*2-1)*w*0.18*inten;
+    ctx.drawImage(canvas, 0,sy,w,sh, ox,sy,w,sh);
+  }
+  // 3) デジタルノイズの色ブロック
+  if(Math.random()<0.85){
+    ctx.save(); ctx.globalCompositeOperation='difference';
+    const n=2+Math.floor(Math.random()*5);
+    for(let i=0;i<n;i++){
+      ctx.fillStyle='rgb('+r255()+','+r255()+','+r255()+')';
+      ctx.fillRect(Math.random()*w, Math.random()*h, w*(0.08+Math.random()*0.4), h*(0.01+Math.random()*0.05));
+    }
+    ctx.restore();
+  }
+  // 4) たまに全反転フリッカー
+  if(Math.random()<0.18){
+    ctx.save(); ctx.globalCompositeOperation='difference';
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h); ctx.restore();
+  }
+  // 5) 走査線
+  ctx.save(); ctx.globalAlpha=0.10; ctx.fillStyle='#000';
+  for(let y=0;y<h;y+=3) ctx.fillRect(0,y,w,1);
+  ctx.restore();
+}
+function fireGlitch(){
+  glitchDur=160+Math.random()*200;          // 160〜360ms
+  glitchUntil=performance.now()+glitchDur;
+}
+
+/* ===== 録画（押している間だけ） ===== */
+function render(cur){
+  bar.style.width=Math.min(cur/MAX_MS*100,100)+'%';
+  timeEl.textContent=(Math.min(cur,MAX_MS)/1000).toFixed(1)+' / 15.0s';
+}
+function meter(){
+  if(!holding) return;
+  const cur=accMs+(performance.now()-holdStart);
+  render(cur);
+  if(cur>=MAX_MS){ accMs=MAX_MS; endHold(true); finishRecording(); return; }
+  rafMeter=requestAnimationFrame(meter);
+}
+function startHold(){
+  if(!recorder || holding || accMs>=MAX_MS || resultEl.classList.contains('show')) return;
+  holding=true;
+  shutter.classList.add('holding'); view.classList.add('recording');
+  finishBtn.disabled=true;
+  if(!started){ recorder.start(); started=true; } else { recorder.resume(); }
+  fireGlitch();                              // 押した瞬間にグリッチ（録画に焼き込まれる）
+  holdStart=performance.now();
+  rafMeter=requestAnimationFrame(meter);
+}
+function endHold(reachedMax){
+  if(!holding) return;
+  holding=false; cancelAnimationFrame(rafMeter);
+  accMs += performance.now()-holdStart;
+  if(reachedMax) accMs=MAX_MS;
+  if(recorder.state==='recording') recorder.pause();
+  shutter.classList.remove('holding'); view.classList.remove('recording');
+  render(accMs);
+  if(accMs<MAX_MS) finishBtn.disabled=false;
+}
+function finishRecording(){
+  finishBtn.disabled=true; shutter.disabled=true;
+  if(recorder && recorder.state!=='inactive') recorder.stop();
+}
+
+/* ===== 結果・保存 ===== */
+function ext(){ return (lastBlob&&lastBlob.type.includes('mp4'))?'mp4':'webm'; }
+function finalize(){
+  if(!chunks.length) return;
+  const type=chunks[0].type||mime||'video/webm';
+  lastBlob=new Blob(chunks,{type});
+  out.src=URL.createObjectURL(lastBlob);
+  const ok = navigator.canShare && navigator.canShare({files:[new File([lastBlob],'v.'+ext(),{type})]});
+  saveHint.textContent = ok
+    ? '「保存」→ 共有シートの「ビデオを保存」でカメラロールに入ります。'
+    : 'この端末では共有保存が使えないため、保存するとファイルとしてダウンロードされます。';
+  resultEl.classList.add('show');
+}
+async function save(){
+  if(!lastBlob) return;
+  const file=new File([lastBlob], 'glitch-'+Date.now()+'.'+ext(), {type:lastBlob.type});
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    try{ await navigator.share({files:[file], title:'グリッチ録画'}); return; }
+    catch(e){ if(e.name==='AbortError') return; }
+  }
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(lastBlob); a.download=file.name;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function reset(){
+  resultEl.classList.remove('show');
+  chunks=[]; lastBlob=null; accMs=0; holding=false; started=false;
+  shutter.disabled=false; finishBtn.disabled=true; render(0);
+  makeRecorder();
+}
+
+shutter.addEventListener('pointerdown',e=>{ e.preventDefault(); startHold(); });
+window.addEventListener('pointerup',()=>{ if(holding) endHold(false); });
+window.addEventListener('pointercancel',()=>{ if(holding) endHold(false); });
+shutter.addEventListener('contextmenu',e=>e.preventDefault());
+finishBtn.addEventListener('click',finishRecording);
+saveBtn.addEventListener('click',save);
+retake.addEventListener('click',reset);
+init();
+</script>
+</body>
+</html>
