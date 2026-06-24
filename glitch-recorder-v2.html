@@ -6,7 +6,7 @@
 <title>グリッチ録画（ストリート）</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Rock+Salt&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@200;300&display=swap" rel="stylesheet">
 <style>
   :root{ --bg:#07080a; --fg:#f4f5f7; --muted:#8b929c; --rec:#ff3b30; --ok:#34c759; --line:#2a2e35; }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -107,7 +107,7 @@ function makeRecorder(){
 async function init(){
   if(!navigator.mediaDevices?.getUserMedia) return fail('このブラウザはカメラ取得に対応していません。');
   if(!window.MediaRecorder) return fail('このブラウザはMediaRecorderに非対応です。');
-  if(document.fonts&&document.fonts.load){ document.fonts.load("32px 'Rock Salt'").catch(()=>{}); } // 手書きフォント先読み
+  if(document.fonts&&document.fonts.load){ document.fonts.load("300 32px 'Montserrat'").catch(()=>{}); } // フォント先読み
   try{
     stream=await navigator.mediaDevices.getUserMedia({
       video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}}, audio:true });
@@ -239,19 +239,20 @@ function fxStrobe(fx,p,w,h){
 }
 
 /* ===== 手書き日付タグ（Rock Salt） ===== */
-function dateStr(d){ return d.getFullYear()+'.'+(d.getMonth()+1)+'.'+d.getDate(); }
+function dateStr(d){ return d.getFullYear()+'.'+pad2(d.getMonth()+1)+'.'+pad2(d.getDate()); }
 function fireTag(){
   tagUntil=performance.now()+750;
-  tag={ x:rnd(0.10,0.26), y:rnd(0.52,0.70), rot:rnd(-0.62,-0.44),
-        size:rnd(0.085,0.11), text:dateStr(new Date()) };
+  tag={ size:0.032, text:dateStr(new Date()) };       // 中央・小さめ
 }
 function drawTag(w,h){
   if(!tag || performance.now()>=tagUntil) return;     // 0.75秒だけ表示→即消し
-  const fs=Math.round(h*tag.size), txt=tag.text;
+  const fs=Math.round(h*tag.size), txt=tag.text, ls=fs*0.38;  // ls=字間
   ctx.save();
-  ctx.translate(tag.x*w, tag.y*h); ctx.rotate(tag.rot);
-  ctx.font=fs+"px 'Rock Salt', cursive"; ctx.textBaseline='alphabetic';
-  ctx.fillStyle='#fff'; ctx.fillText(txt,0,0);        // 白・袋文字なし・下線なし
+  ctx.font="300 "+fs+"px 'Montserrat', sans-serif"; ctx.textBaseline='middle'; ctx.textAlign='left';
+  ctx.fillStyle='#fff';
+  let total=-ls; for(const ch of txt) total+=ctx.measureText(ch).width+ls;  // 字間込みの全幅
+  let x=w/2-total/2; const y=h/2;
+  for(const ch of txt){ ctx.fillText(ch,x,y); x+=ctx.measureText(ch).width+ls; } // 中央に等間隔配置
   ctx.restore();
 }
 
