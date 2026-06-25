@@ -190,9 +190,7 @@ function endHold(reachedMax){
 }
 function finishRecording(){
   finishBtn.disabled=true; shutter.disabled=true;
-  if(!recorder || recorder.state==='inactive') return;
-  if(recorder.state==='paused') recorder.resume();                 // 一時停止のまま止めない
-  setTimeout(()=>{ if(recorder.state!=='inactive') recorder.stop(); }, 120); // 実フレームを少し入れて最終コマを区切る
+  if(recorder && recorder.state!=='inactive') recorder.stop();   // 一時停止のまま終了（完了時の生映像は入れない）
 }
 
 /* ===== 結果・保存 ===== */
