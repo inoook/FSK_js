@@ -218,20 +218,27 @@ function diagnose(blob){
   blob.arrayBuffer().then(ab=>{
     ab.fileStart=0;
     const mp4=MP4Box.createFile();
+    const st={}; let vId=null, aId=null, frag=false;
     mp4.onError=()=>setDiag('解析失敗');
+    function report(){
+      const v=vId!=null?st[vId]:null, a=aId!=null?st[aId]:null;
+      if(!v) return;
+      setDiag((frag?'[fMP4] ':'')+v.count+'frames / 映像'+(v.dur/v.ts).toFixed(2)+'s'+
+        (a?(' / 音声'+(a.dur/a.ts).toFixed(2)+'s'):'')+
+        ' / 末尾コマ'+Math.round((v.last||0)/v.ts*1000)+'ms（通常'+Math.round((v.first||0)/v.ts*1000)+'ms）');
+    }
+    mp4.onSamples=(id,u,samples)=>{
+      const s=st[id]; if(!s) return;
+      for(const smp of samples){ s.count++; s.dur+=smp.duration; if(s.first==null)s.first=smp.duration; s.last=smp.duration; }
+      report();
+    };
     mp4.onReady=info=>{
-      try{
-        const v=info.tracks.find(t=>t.type==='video');
-        const a=info.tracks.find(t=>t.type==='audio');
-        if(!v){ setDiag('映像トラックなし'); return; }
-        const trak=mp4.getTrackById(v.id), stts=trak.mdia.minf.stbl.stts, ts=v.timescale;
-        let n=0; for(const c of stts.sample_counts) n+=c;
-        const lastD=stts.sample_deltas[stts.sample_deltas.length-1];
-        const medD=stts.sample_deltas[0];
-        const vDur=v.duration/ts, aDur=a?a.duration/a.timescale:0;
-        setDiag(n+'frames / 映像'+vDur.toFixed(2)+'s'+(a?(' / 音声'+aDur.toFixed(2)+'s'):'')+
-          ' / 末尾コマ'+Math.round(lastD/ts*1000)+'ms（通常'+Math.round(medD/ts*1000)+'ms）');
-      }catch(e){ setDiag('解析エラー: '+e.message); }
+      frag=!!info.isFragmented;
+      const vs=info.videoTracks||[], as=info.audioTracks||[];
+      [...vs,...as].forEach(t=>{ st[t.id]={count:0,dur:0,last:0,first:null,ts:t.timescale};
+        mp4.setExtractionOptions(t.id,null,{nbSamples:1000000}); });
+      if(vs[0]) vId=vs[0].id; if(as[0]) aId=as[0].id;
+      mp4.start();
     };
     mp4.appendBuffer(ab); mp4.flush();
   }).catch(()=>setDiag('読込失敗'));
