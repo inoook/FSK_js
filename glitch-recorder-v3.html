@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>グリッチ録画（ストリート / Shader）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@200;300&display=swap" rel="stylesheet">
+<style>
+  :root{ --bg:#07080a; --fg:#f4f5f7; --muted:#8b929c; --rec:#ff3b30; --ok:#34c759; --line:#2a2e35; }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;overscroll-behavior:none}
+  #stage{position:fixed;inset:0;display:flex;flex-direction:column}
+  .view{position:relative;flex:1;background:#000;overflow:hidden}
+  #cam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;opacity:0}
+  #preview{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:2;background:#000}
+  .track{position:absolute;top:max(14px,env(safe-area-inset-top));left:12px;right:12px;
+    height:4px;border-radius:99px;background:rgba(255,255,255,.25);overflow:hidden;z-index:3}
+  .track>i{display:block;height:100%;width:0;background:var(--fg)}
+  .recording .track>i{background:var(--rec)}
+  .clock{position:absolute;left:0;right:0;bottom:40px;text-align:center;font-variant-numeric:tabular-nums;
+    font-size:13px;letter-spacing:.04em;color:var(--muted);z-index:3;pointer-events:none}
+  .hint{position:absolute;left:0;right:0;bottom:14px;text-align:center;font-size:12px;
+    color:var(--muted);z-index:3;pointer-events:none}
+  .bar{display:flex;align-items:center;justify-content:space-between;
+    padding:18px 26px calc(20px + env(safe-area-inset-bottom));gap:16px;background:var(--bg)}
+  .slot{width:64px;display:flex;justify-content:center}
+  .txt{background:none;border:0;color:var(--fg);font-size:15px;padding:10px;cursor:pointer}
+  .txt:disabled{color:var(--line)}
+  #shutter{width:74px;height:74px;border-radius:50%;border:4px solid var(--fg);background:transparent;
+    padding:5px;display:grid;place-items:center;cursor:pointer;touch-action:none;
+    -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  #shutter>span{width:100%;height:100%;border-radius:50%;background:var(--rec);transition:border-radius .15s,transform .15s}
+  #shutter:disabled{opacity:.35}
+  #shutter.holding>span{border-radius:30%;transform:scale(.7)}
+  #result{position:fixed;inset:0;background:var(--bg);z-index:9;display:none;flex-direction:column;
+    padding:max(16px,env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom))}
+  #result.show{display:flex}
+  #result video{position:static;flex:1;border-radius:14px;object-fit:contain;background:#000}
+  .rbar{display:flex;gap:12px;padding-top:14px}
+  .btn{flex:1;text-align:center;text-decoration:none;padding:15px;border-radius:12px;font-size:16px;font-weight:600;border:0;cursor:pointer}
+  .btn.dl{background:var(--ok);color:#04270f}
+  .btn.again{background:var(--line);color:var(--fg)}
+  .note{padding-top:10px;font-size:12px;color:var(--muted);text-align:center;line-height:1.6}
+  #msg{position:fixed;inset:0;display:none;place-items:center;padding:32px;text-align:center;
+    color:var(--muted);font-size:15px;line-height:1.7;z-index:20;white-space:pre-line}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="view" id="view">
+    <video id="cam" autoplay muted playsinline></video>
+    <canvas id="preview"></canvas>
+    <div class="track"><i id="bar"></i></div>
+    <div class="clock"><span id="time">0.0 / 15.0s</span></div>
+    <div class="hint">押している間だけ録画／押すたびにトランジション＋日付タグ</div>
+  </div>
+  <div class="bar">
+    <div class="slot"></div>
+    <button id="shutter" aria-label="押している間だけ録画"><span></span></button>
+    <div class="slot"><button id="finish" class="txt" disabled>完了</button></div>
+  </div>
+</div>
+
+<div id="result">
+  <video id="out" controls playsinline></video>
+  <div class="rbar">
+    <button id="retake" class="btn again">撮り直す</button>
+    <button id="save" class="btn dl">保存</button>
+  </div>
+  <div class="note" id="savehint"></div>
+</div>
+
+<div id="msg"></div>
+
+<script>
+const MAX_MS = 15000;
+const $ = s => document.querySelector(s);
+const cam=$('#cam'), canvas=$('#preview'), shutter=$('#shutter'), finishBtn=$('#finish'),
+      bar=$('#bar'), timeEl=$('#time'), view=$('#view'),
+      resultEl=$('#result'), out=$('#out'), saveBtn=$('#save'),
+      retake=$('#retake'), saveHint=$('#savehint'), msg=$('#msg');
+const ctx=canvas.getContext('2d');
+
+let stream, recordStream, recorder, chunks=[], mime='', lastBlob=null;
+let accMs=0, holding=false, started=false, holdStart=0, rafMeter=0;
+let fx=null, tag=null, tagUntil=0, sessionStart=Date.now();
+let scanPat;                                  // HUD用スキャンライン（2D）
+
+/* WebGL リソース */
+let glCanvas, gl, prog, tex, U;
+
+const rnd=(a,b)=>a+Math.random()*(b-a);
+function fail(t){msg.textContent=t;msg.style.display='grid';}
+
+/* ===== シェーダー ===== */
+const VSRC = `
+attribute vec2 a_pos;
+varying vec2 v_uv;
+void main(){
+  v_uv = a_pos*0.5 + 0.5;
+  gl_Position = vec4(a_pos, 0.0, 1.0);
+}`;
+
+const FSRC = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+varying vec2 v_uv;
+uniform sampler2D u_tex;
+uniform vec2  u_res;
+uniform float u_time;
+uniform int   u_kind;     // 0 none,1 chroma,2 shuffle,3 vhs,4 strobe
+uniform float u_p;        // 0->1 進行度
+uniform float u_seed;
+uniform float u_angle;
+uniform float u_cols;
+uniform float u_rows;
+uniform int   u_pat;      // 0 rand,1 rowshift,2 colshift,3 mirror,4 checker
+uniform float u_flashes;
+
+float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453123); }
+
+/* 色収差：RGBを反対方向にサンプルしてずらす（kで収束） */
+vec3 fxChroma(vec2 uv){
+  float k = 1.0 - u_p;
+  vec2 d = vec2(cos(u_angle), sin(u_angle)) * (u_res.x*0.02*(0.3+k)) / u_res;
+  float r = texture2D(u_tex, uv + d).r;
+  float g = texture2D(u_tex, uv).g;
+  float b = texture2D(u_tex, uv - d).b;
+  return vec3(r,g,b);
+}
+
+/* ブロックシャッフル：セルごとにサンプル元UVを付け替え */
+vec3 fxShuffle(vec2 uv){
+  float k = 1.0 - u_p;
+  vec2 grid = vec2(u_cols, u_rows);
+  vec2 cell  = floor(uv*grid);
+  vec2 local = fract(uv*grid);
+  vec2 src = cell;
+  float bs = u_seed + floor(u_time*30.0);          // 毎フレーム振り直す系(boil)
+  if(u_pat==1){                                    // rowshift（固定seed）
+    float base = floor((h21(vec2(cell.y, u_seed))*2.0 - 1.0)*u_cols);
+    float off = floor(base*k + 0.5);
+    src.x = mod(cell.x + off, u_cols);
+  } else if(u_pat==2){                             // colshift（固定seed）
+    float base = floor((h21(vec2(cell.x, u_seed+7.0))*2.0 - 1.0)*u_rows);
+    float off = floor(base*k + 0.5);
+    src.y = mod(cell.y + off, u_rows);
+  } else if(u_pat==3){                             // mirror（boil）
+    if(h21(cell+bs) < k*0.9){ src.x = u_cols - 1.0 - cell.x; }
+  } else if(u_pat==4){                             // checker（boil）
+    if(mod(cell.x+cell.y,2.0) > 0.5 && h21(cell+bs) < k){
+      src = floor(vec2(h21(cell+bs+1.0), h21(cell+bs+2.0))*grid);
+    }
+  } else {                                         // rand（boil）
+    if(h21(cell+bs) < k*0.85){
+      src = floor(vec2(h21(cell+bs+1.0), h21(cell+bs+2.0))*grid);
+    }
+  }
+  vec3 col = texture2D(u_tex, (src + local)/grid).rgb;
+  if(u_pat==0 && h21(cell+bs) < k*0.85 && h21(cell+bs+3.0) < 0.2){
+    vec3 rc = vec3(h21(cell+bs+4.0), h21(cell+bs+5.0), h21(cell+bs+6.0));
+    col = abs(col - rc);                           // difference 風フラッシュ
+  }
+  return col;
+}
+
+/* VHS：行ごと横ズレ＋ゴースト＋走査線 */
+vec3 fxVHS(vec2 uv){
+  float k = 1.0 - u_p;
+  float t = floor(u_time*15.0);
+  float by = floor(uv.y*18.0);
+  float jit = (h21(vec2(by,t))*2.0 - 1.0);
+  float amt = step(0.6, h21(vec2(by,t+9.0))) * jit * 0.06 * k;
+  vec2 juv = vec2(uv.x + amt, uv.y);
+  vec3 col = texture2D(u_tex, juv).rgb;
+  float gx = 0.012*(0.6+k);
+  vec3 g1 = texture2D(u_tex, juv + vec2(gx,0.0)).rgb;
+  vec3 g2 = texture2D(u_tex, juv - vec2(gx,0.0)).rgb;
+  vec3 ghost = 1.0 - (1.0-g1)*(1.0-g2);            // screen
+  col = mix(col, max(col, ghost), 0.4);
+  float line = step(0.985, h21(vec2(floor(uv.y*u_res.y), floor(u_time*12.0))));
+  col += line * 0.6 * k;
+  return col;
+}
+
+/* ストロボ：白／黒／反転フラッシュ */
+vec3 fxStrobe(vec2 uv){
+  vec3 col = texture2D(u_tex, uv).rgb;
+  float phase = floor(u_p*u_flashes);
+  if(mod(phase,2.0) > 0.5){
+    float r = mod(phase*7.0 + u_seed, 3.0);
+    if(r < 1.0) return vec3(1.0);
+    else if(r < 2.0) return vec3(0.0);
+    else return 1.0 - col;
+  }
+  return col;
+}
+
+void main(){
+  vec3 col;
+  if(u_kind==1)      col = fxChroma(v_uv);
+  else if(u_kind==2) col = fxShuffle(v_uv);
+  else if(u_kind==3) col = fxVHS(v_uv);
+  else if(u_kind==4) col = fxStrobe(v_uv);
+  else               col = texture2D(u_tex, v_uv).rgb;
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const KIND={chroma:1,shuffle:2,vhs:3,strobe:4};
+const PAT ={rand:0,rowshift:1,colshift:2,mirror:3,checker:4};
+
+function compile(type,src){
+  const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s);
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){ console.error(gl.getShaderInfoLog(s)); return null; }
+  return s;
+}
+function initGL(){
+  gl = glCanvas.getContext('webgl',{alpha:false,antialias:false,depth:false,stencil:false,preserveDrawingBuffer:true})
+     || glCanvas.getContext('experimental-webgl',{alpha:false,preserveDrawingBuffer:true});
+  if(!gl) return false;
+  const vs=compile(gl.VERTEX_SHADER,VSRC), fs=compile(gl.FRAGMENT_SHADER,FSRC);
+  if(!vs||!fs) return false;
+  prog=gl.createProgram(); gl.attachShader(prog,vs); gl.attachShader(prog,fs); gl.linkProgram(prog);
+  if(!gl.getProgramParameter(prog,gl.LINK_STATUS)){ console.error(gl.getProgramInfoLog(prog)); return false; }
+  gl.useProgram(prog);
+  const buf=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]),gl.STATIC_DRAW);
+  const loc=gl.getAttribLocation(prog,'a_pos'); gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+  tex=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,tex);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);    // 映像を正立で扱う
+  U={
+    tex:gl.getUniformLocation(prog,'u_tex'),   res:gl.getUniformLocation(prog,'u_res'),
+    time:gl.getUniformLocation(prog,'u_time'), kind:gl.getUniformLocation(prog,'u_kind'),
+    p:gl.getUniformLocation(prog,'u_p'),       seed:gl.getUniformLocation(prog,'u_seed'),
+    angle:gl.getUniformLocation(prog,'u_angle'),cols:gl.getUniformLocation(prog,'u_cols'),
+    rows:gl.getUniformLocation(prog,'u_rows'), pat:gl.getUniformLocation(prog,'u_pat'),
+    flashes:gl.getUniformLocation(prog,'u_flashes')
+  };
+  gl.uniform1i(U.tex,0);
+  return true;
+}
+
+async function init(){
+  if(!navigator.mediaDevices?.getUserMedia) return fail('このブラウザはカメラ取得に対応していません。');
+  if(!window.MediaRecorder) return fail('このブラウザはMediaRecorderに非対応です。');
+  if(document.fonts&&document.fonts.load){ document.fonts.load("300 32px 'Montserrat'").catch(()=>{}); }
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}}, audio:true });
+  }catch(e){return fail('カメラを開始できませんでした（権限とHTTPS接続を確認してください）。\n'+e.message);}
+  cam.srcObject=stream;
+  cam.onloadedmetadata=()=>{
+    cam.play().catch(()=>{});
+    let vw=cam.videoWidth||1280, vh=cam.videoHeight||720;
+    const cap=1280, s=Math.min(1, cap/Math.max(vw,vh));
+    const W=Math.round(vw*s), H=Math.round(vh*s);
+    canvas.width=W; canvas.height=H;
+    glCanvas=document.createElement('canvas'); glCanvas.width=W; glCanvas.height=H;
+    if(!initGL()) return fail('WebGLを初期化できませんでした。');
+    gl.viewport(0,0,W,H);
+    initBuffers();
+    requestAnimationFrame(draw);
+    recordStream=canvas.captureStream(30);
+    stream.getAudioTracks().forEach(t=>recordStream.addTrack(t));
+    mime=pickMime();
+    makeRecorder();
+  };
+}
+function initBuffers(){
+  const sc=document.createElement('canvas'); sc.width=1; sc.height=3;
+  const sx=sc.getContext('2d'); sx.fillStyle='rgba(0,0,0,1)'; sx.fillRect(0,2,1,1);
+  scanPat=ctx.createPattern(sc,'repeat');
+}
+
+function pickMime(){
+  const c=['video/mp4','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
+  return c.find(m=>window.MediaRecorder&&MediaRecorder.isTypeSupported(m))||'';
+}
+function makeRecorder(){
+  recorder=new MediaRecorder(recordStream, mime?{mimeType:mime}:undefined);
+  recorder.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
+  recorder.onstop=finalize;
+}
+
+/* ===== GL 1パス描画 ===== */
+function renderGL(){
+  gl.bindTexture(gl.TEXTURE_2D,tex);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,cam);
+  gl.uniform2f(U.res, glCanvas.width, glCanvas.height);
+  gl.uniform1f(U.time, (performance.now()/1000)%1000.0);
+  let kind=0, p=0;
+  if(fx){ p=(performance.now()-fx.start)/fx.dur; if(p>=1) fx=null; }
+  if(fx){
+    kind=KIND[fx.kind];
+    gl.uniform1f(U.p,p); gl.uniform1f(U.seed,fx.seed);
+    gl.uniform1f(U.angle,fx.angle||0);
+    gl.uniform1f(U.cols,fx.cols||1); gl.uniform1f(U.rows,fx.rows||1);
+    gl.uniform1i(U.pat,PAT[fx.pat]||0); gl.uniform1f(U.flashes,fx.flashes||1);
+  }
+  gl.uniform1i(U.kind,kind);
+  gl.drawArrays(gl.TRIANGLES,0,6);
+}
+
+/* ===== 描画ループ（30fpsに間引き） ===== */
+let lastFrame=0;
+function draw(t){
+  requestAnimationFrame(draw);
+  if(t-lastFrame < 31) return;            // ~30fps
+  lastFrame=t;
+  const w=canvas.width,h=canvas.height;
+  if(cam.readyState>=2) renderGL();
+  ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over';
+  ctx.drawImage(glCanvas,0,0,w,h);        // GL結果を2Dへ1回だけ転送
+  drawHUD(w,h);
+  drawTag(w,h);
+}
+
+/* ===== トランジション（パラメータのみ生成。描画はシェーダー） ===== */
+const FX=['chroma','shuffle','vhs','strobe'];
+function fireTransition(){
+  const kind=FX[Math.floor(Math.random()*FX.length)];
+  const base={chroma:340,shuffle:360,vhs:380,strobe:340}[kind];
+  fx={kind, start:performance.now(), dur:base*rnd(0.8,1.3), seed:Math.random()*997};
+  if(kind==='chroma') fx.angle=Math.random()<0.7 ? rnd(-0.25,0.25) : rnd(0,6.283);
+  if(kind==='shuffle'){
+    fx.cols=6+Math.floor(Math.random()*7);
+    fx.rows=4+Math.floor(Math.random()*5);
+    fx.pat=['rand','rowshift','colshift','mirror','checker'][Math.floor(Math.random()*5)];
+  }
+  if(kind==='strobe') fx.flashes=4+Math.floor(Math.random()*5);
+}
+
+/* ===== 手書き日付タグ（2D・据え置き） ===== */
+function dateStr(d){ return d.getFullYear()+'.'+pad2(d.getMonth()+1)+'.'+pad2(d.getDate()); }
+function fireTag(){ tagUntil=performance.now()+750; tag={ size:0.032, text:dateStr(new Date()) }; }
+function drawTag(w,h){
+  if(!tag || performance.now()>=tagUntil) return;
+  const fs=Math.round(h*tag.size), txt=tag.text, ls=fs*0.38;
+  ctx.save();
+  ctx.font="300 "+fs+"px 'Montserrat', sans-serif"; ctx.textBaseline='middle'; ctx.textAlign='left';
+  ctx.fillStyle='#fff';
+  let total=-ls; for(const ch of txt) total+=ctx.measureText(ch).width+ls;
+  let x=w/2-total/2; const y=h/2;
+  for(const ch of txt){ ctx.fillText(ch,x,y); x+=ctx.measureText(ch).width+ls; }
+  ctx.restore();
+}
+
+/* ===== HUD（2D・据え置き） ===== */
+function pad2(n){ return String(n).padStart(2,'0'); }
+function timecode(){
+  let ms=Date.now()-sessionStart; const f=Math.floor((ms%1000)/(1000/30)); ms=Math.floor(ms/1000);
+  return pad2(Math.floor(ms/3600))+':'+pad2(Math.floor(ms/60)%60)+':'+pad2(ms%60)+':'+pad2(f);
+}
+function bracket(x,y,sx,sy,L){ ctx.beginPath(); ctx.moveTo(x+sx*L,y); ctx.lineTo(x,y); ctx.lineTo(x,y+sy*L); ctx.stroke(); }
+function drawHUD(w,h){
+  ctx.save();
+  ctx.globalAlpha=0.08; ctx.fillStyle=scanPat; ctx.fillRect(0,0,w,h); ctx.globalAlpha=1;
+  const fs=Math.max(12,Math.round(h*0.030)), pad=Math.round(h*0.035);
+  ctx.font=fs+'px ui-monospace, Menlo, monospace'; ctx.textBaseline='top';
+  if(Math.floor(Date.now()/500)%2===0){ ctx.fillStyle='rgba(255,59,48,0.95)';
+    ctx.beginPath(); ctx.arc(pad+fs*0.35, pad+fs*0.55, fs*0.32, 0, 6.283); ctx.fill(); }
+  ctx.fillStyle='rgba(255,255,255,0.85)'; ctx.fillText('REC', pad+fs*0.9, pad);
+  const tc=timecode(), tw=ctx.measureText(tc).width; ctx.fillText(tc, w-pad-tw, pad);
+  ctx.strokeStyle='rgba(255,255,255,0.45)'; ctx.lineWidth=Math.max(1.5,h*0.004);
+  const L=Math.round(w*0.045), m=pad;
+  bracket(m,m,1,1,L); bracket(w-m,m,-1,1,L); bracket(m,h-m,1,-1,L); bracket(w-m,h-m,-1,-1,L);
+  ctx.restore();
+}
+
+/* ===== 録画（押している間だけ） ===== */
+function render(cur){ bar.style.width=Math.min(cur/MAX_MS*100,100)+'%';
+  timeEl.textContent=(Math.min(cur,MAX_MS)/1000).toFixed(1)+' / 15.0s'; }
+function meter(){
+  if(!holding) return;
+  const cur=accMs+(performance.now()-holdStart); render(cur);
+  if(cur>=MAX_MS){ accMs=MAX_MS; endHold(true); finishRecording(); return; }
+  rafMeter=requestAnimationFrame(meter);
+}
+function startHold(){
+  if(!recorder || holding || accMs>=MAX_MS || resultEl.classList.contains('show')) return;
+  holding=true; shutter.classList.add('holding'); view.classList.add('recording'); finishBtn.disabled=true;
+  if(!started){ recorder.start(); started=true; fireTag(); } else { recorder.resume(); }
+  fireTransition();
+  holdStart=performance.now(); rafMeter=requestAnimationFrame(meter);
+}
+function endHold(reachedMax){
+  if(!holding) return;
+  holding=false; cancelAnimationFrame(rafMeter);
+  accMs += performance.now()-holdStart; if(reachedMax) accMs=MAX_MS;
+  if(recorder.state==='recording') recorder.pause();
+  shutter.classList.remove('holding'); view.classList.remove('recording'); render(accMs);
+  if(accMs<MAX_MS) finishBtn.disabled=false;
+}
+function finishRecording(){ finishBtn.disabled=true; shutter.disabled=true;
+  if(recorder && recorder.state!=='inactive') recorder.stop(); }
+
+/* ===== 結果・保存 ===== */
+function ext(){ return (lastBlob&&lastBlob.type.includes('mp4'))?'mp4':'webm'; }
+function finalize(){
+  if(!chunks.length) return;
+  const type=chunks[0].type||mime||'video/webm';
+  lastBlob=new Blob(chunks,{type}); out.src=URL.createObjectURL(lastBlob);
+  const ok = navigator.canShare && navigator.canShare({files:[new File([lastBlob],'v.'+ext(),{type})]});
+  saveHint.textContent = ok
+    ? '「保存」→ 共有シートの「ビデオを保存」でカメラロールに入ります。'
+    : 'この端末では共有保存が使えないため、保存するとファイルとしてダウンロードされます。';
+  resultEl.classList.add('show');
+}
+async function save(){
+  if(!lastBlob) return;
+  const file=new File([lastBlob], 'glitch-'+Date.now()+'.'+ext(), {type:lastBlob.type});
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    try{ await navigator.share({files:[file], title:'グリッチ録画'}); return; }
+    catch(e){ if(e.name==='AbortError') return; }
+  }
+  const a=document.createElement('a'); a.href=URL.createObjectURL(lastBlob); a.download=file.name;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function reset(){
+  resultEl.classList.remove('show');
+  chunks=[]; lastBlob=null; accMs=0; holding=false; started=false; fx=null; tag=null;
+  shutter.disabled=false; finishBtn.disabled=true; render(0); makeRecorder();
+}
+
+shutter.addEventListener('pointerdown',e=>{ e.preventDefault(); startHold(); });
+window.addEventListener('pointerup',()=>{ if(holding) endHold(false); });
+window.addEventListener('pointercancel',()=>{ if(holding) endHold(false); });
+shutter.addEventListener('contextmenu',e=>e.preventDefault());
+finishBtn.addEventListener('click',finishRecording);
+saveBtn.addEventListener('click',save);
+retake.addEventListener('click',reset);
+init();
+</script>
+</body>
+</html>
